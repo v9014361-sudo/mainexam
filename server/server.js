@@ -15,6 +15,7 @@ const authRoutes = require('./routes/auth');
 const examRoutes = require('./routes/exam');
 const proctorRoutes = require('./routes/proctor');
 const adminRoutes = require('./routes/admin');
+const compilerRoutes = require('./routes/compiler');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -120,6 +121,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/exam', examRoutes);
 app.use('/api/proctor', proctorRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/compiler', compilerRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

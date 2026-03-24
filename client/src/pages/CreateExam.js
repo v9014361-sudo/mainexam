@@ -31,6 +31,9 @@ const emptyQ = {
   correctAnswer: '',
   points: 1,
   difficulty: 'medium',
+  testCases: [{ input: '', expectedOutput: '', isPublic: false }],
+  starterCode: '',
+  allowedLanguages: ['cpp', 'java', 'python', 'c'],
 };
 
 const emptyExam = {
@@ -78,6 +81,11 @@ const CreateExam = () => {
           correctAnswer: q.correctAnswer || '',
           points: q.points ?? 1,
           difficulty: q.difficulty || 'medium',
+          testCases: q.testCases?.length 
+            ? q.testCases.map(tc => ({ ...tc }))
+            : [{ input: '', expectedOutput: '', isPublic: false }],
+          starterCode: q.starterCode || '',
+          allowedLanguages: q.allowedLanguages || ['cpp', 'java', 'python', 'c'],
         }));
 
         setQuestions(
@@ -122,6 +130,27 @@ const CreateExam = () => {
       )
     );
   };
+  
+  const addTestCase = (qIdx) => {
+    setQuestions((prev) => prev.map((q, i) => 
+      i === qIdx ? { ...q, testCases: [...q.testCases, { input: '', expectedOutput: '', isPublic: false }] } : q
+    ));
+  };
+  
+  const removeTestCase = (qIdx, tIdx) => {
+    setQuestions((prev) => prev.map((q, i) => 
+      i === qIdx ? { ...q, testCases: q.testCases.filter((_, ti) => ti !== tIdx) } : q
+    ));
+  };
+  
+  const updateTestCase = (qIdx, tIdx, field, value) => {
+    setQuestions((prev) => prev.map((q, i) => 
+      i === qIdx ? {
+        ...q,
+        testCases: q.testCases.map((tc, ti) => ti === tIdx ? { ...tc, [field]: value } : tc)
+      } : q
+    ));
+  };
 
   const handleImageFile = (idx, file) => {
     if (!file) return;
@@ -149,11 +178,32 @@ const CreateExam = () => {
       if (questions[i].questionType === 'mcq' && !questions[i].options.some((o) => o.isCorrect)) {
         return setError(`Question ${i + 1} needs a correct answer`);
       }
+      if (questions[i].questionType === 'coding') {
+        if (!questions[i].testCases || questions[i].testCases.length === 0) {
+          return setError(`Question ${i + 1} (Coding) needs at least one test case`);
+        }
+        if (questions[i].testCases.some(tc => !tc.expectedOutput.trim())) {
+          return setError(`All test cases for Question ${i + 1} must have an expected output`);
+        }
+      }
     }
 
     setLoading(true);
     try {
-      const payloadQuestions = questions.map(({ imageInputType, ...rest }) => rest);
+      const payloadQuestions = questions.map(({ imageInputType, ...rest }) => {
+        // Filter out irrelevant fields based on question type
+        if (rest.questionType === 'coding') {
+          return { ...rest, options: [], correctAnswer: '' };
+        }
+        if (rest.questionType === 'short-answer') {
+          return { ...rest, options: [] };
+        }
+        if (rest.questionType === 'mcq' || rest.questionType === 'true-false') {
+          return { ...rest, testCases: [], starterCode: '' };
+        }
+        return rest;
+      });
+      
       if (isEditMode) {
         await api.put(`/exam/${id}`, { ...exam, questions: payloadQuestions });
       } else {
@@ -281,7 +331,19 @@ const CreateExam = () => {
               {questions.map((q, qi) => (
                 <div key={qi} style={st.qCard}>
                   <div style={st.qHeader}>
-                    <span style={st.qNum}>Question {qi + 1}</span>
+                    <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
+                      <span style={st.qNum}>Question {qi + 1}</span>
+                      <select 
+                        value={q.questionType} 
+                        onChange={(e) => updateQuestion(qi, 'questionType', e.target.value)} 
+                        style={{ ...st.select, padding: '0.3rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--accent)' }}
+                      >
+                        <option value="mcq">Multiple Choice</option>
+                        <option value="coding">Coding Question</option>
+                        <option value="short-answer">Short Answer</option>
+                        <option value="true-false">True/False</option>
+                      </select>
+                    </div>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <select value={q.difficulty} onChange={(e) => updateQuestion(qi, 'difficulty', e.target.value)} style={{ ...st.select, padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}>
                         <option value="easy">Easy</option>
@@ -351,19 +413,92 @@ const CreateExam = () => {
                     ) : null}
                   </div>
 
-                  <div style={{ ...st.label, marginBottom: '0.4rem' }}>Options (select the correct one)</div>
-                  {q.options.map((opt, oi) => (
-                    <div key={oi} style={st.optRow}>
-                      <input type="radio" name={`correct-${qi}`} checked={opt.isCorrect} onChange={() => updateOption(qi, oi, 'isCorrect', true)} style={st.radio} />
+                  {q.questionType === 'mcq' || q.questionType === 'true-false' ? (
+                    <>
+                      <div style={{ ...st.label, marginBottom: '0.4rem' }}>Options (select the correct one)</div>
+                      {q.options.map((opt, oi) => (
+                        <div key={oi} style={st.optRow}>
+                          <input type="radio" name={`correct-${qi}`} checked={opt.isCorrect} onChange={() => updateOption(qi, oi, 'isCorrect', true)} style={st.radio} />
+                          <input
+                            style={{ ...st.input, flex: 1 }}
+                            value={opt.text}
+                            onChange={(e) => updateOption(qi, oi, 'text', e.target.value)}
+                            placeholder={`Option ${String.fromCharCode(65 + oi)}`}
+                            required
+                          />
+                        </div>
+                      ))}
+                    </>
+                  ) : null}
+
+                  {q.questionType === 'short-answer' ? (
+                    <div style={st.field}>
+                      <label style={st.label}>Correct Answer</label>
                       <input
-                        style={{ ...st.input, flex: 1 }}
-                        value={opt.text}
-                        onChange={(e) => updateOption(qi, oi, 'text', e.target.value)}
-                        placeholder={`Option ${String.fromCharCode(65 + oi)}`}
+                        style={st.input}
+                        value={q.correctAnswer || ''}
+                        onChange={(e) => updateQuestion(qi, 'correctAnswer', e.target.value)}
+                        placeholder="Expected exact text answer..."
                         required
                       />
                     </div>
-                  ))}
+                  ) : null}
+
+                  {q.questionType === 'coding' ? (
+                    <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                      <div style={st.field}>
+                        <label style={st.label}>Starter Code (Optional)</label>
+                        <textarea
+                          style={{ ...st.textarea, fontFamily: 'monospace', fontSize: '0.8rem' }}
+                          value={q.starterCode || ''}
+                          onChange={(e) => updateQuestion(qi, 'starterCode', e.target.value)}
+                          placeholder="Provide template code for the student..."
+                        />
+                      </div>
+                      
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ ...st.label, display: 'block', marginBottom: '0.5rem' }}>Test Cases</label>
+                        {q.testCases.map((tc, ti) => (
+                          <div key={ti} style={{ ...st.section, background: 'var(--bg-primary)', padding: '1rem', marginBottom: '0.5rem', border: '1px dashed var(--border)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Test Case {ti + 1}</span>
+                              <button type="button" onClick={() => removeTestCase(qi, ti)} style={{ ...st.removeBtn, padding: '0.1rem 0.4rem' }}>Remove</button>
+                            </div>
+                            <div style={st.row}>
+                              <div style={st.field}>
+                                <label style={st.label}>Input</label>
+                                <textarea
+                                  style={{ ...st.textarea, minHeight: 40, fontSize: '0.8rem' }}
+                                  value={tc.input}
+                                  onChange={(e) => updateTestCase(qi, ti, 'input', e.target.value)}
+                                  placeholder="Stdin input..."
+                                />
+                              </div>
+                              <div style={st.field}>
+                                <label style={st.label}>Expected Output</label>
+                                <textarea
+                                  style={{ ...st.textarea, minHeight: 40, fontSize: '0.8rem' }}
+                                  value={tc.expectedOutput}
+                                  onChange={(e) => updateTestCase(qi, ti, 'expectedOutput', e.target.value)}
+                                  placeholder="Stdout output..."
+                                  required
+                                />
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <input 
+                                type="checkbox" 
+                                checked={tc.isPublic} 
+                                onChange={(e) => updateTestCase(qi, ti, 'isPublic', e.target.checked)} 
+                              />
+                              <span style={{ fontSize: '0.75rem' }}>Public (visible to student)</span>
+                            </div>
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => addTestCase(qi)} style={{ ...st.addBtn, padding: '0.4rem', fontSize: '0.8rem', marginTop: '0.5rem' }}>+ Add Test Case</button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ))}
               <button type="button" onClick={addQuestion} style={st.addBtn}>+ Add Question</button>

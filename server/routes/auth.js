@@ -131,13 +131,11 @@ router.post('/login', [
     // For this implementation, we allow only ONE active session per user role
     // If it's an admin, we might be stricter.
     if (user.role === 'admin' && user.activeSessions.length > 0) {
-      logSecurityEvent({
+      logSecurityEvent('auth.multi_login_prevented', {
         actor: user._id,
-        action: 'auth.multi_login_prevented',
         resource: 'User',
         details: { prevSession: user.activeSessions[0], newIp: req.ip },
-        severity: 'high',
-        req
+        severity: 'high'
       });
       // Optionally clear other sessions:
       user.activeSessions = []; 
@@ -154,6 +152,7 @@ router.post('/login', [
     setAuthCookies(res, accessToken, refreshToken);
     res.json({ message: 'Login successful', user: user.toJSON() });
   } catch (error) {
+    console.error('Login Error:', error);
     res.status(500).json({ error: 'Login failed.' });
   }
 });

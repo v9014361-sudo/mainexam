@@ -23,6 +23,8 @@ const ExamTake = () => {
   const [alert, setAlert] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [codingResults, setCodingResults] = useState({}); // { [qId]: result }
   const [accessCode, setAccessCode] = useState('');
   const proctorRef = useRef(null);
   const timerRef = useRef(null);
@@ -138,6 +140,40 @@ const ExamTake = () => {
     } catch (err) {
       setError(err.response?.data?.error || 'Submission failed');
       setPhase('exam');
+    }
+  };
+
+  const runCode = async (qId, code, language) => {
+    if (isRunning) return;
+    setIsRunning(true);
+    try {
+      const { data } = await api.post('/compiler/run', { language, code });
+      setCodingResults(prev => ({ ...prev, [qId]: data }));
+    } catch (err) {
+      setCodingResults(prev => ({ ...prev, [qId]: { stderr: err.response?.data?.error || 'Execution failed' } }));
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const submitCodingQuestion = async (qId, code, language) => {
+    if (isRunning) return;
+    setIsRunning(true);
+    try {
+      const { data } = await api.post('/compiler/submit', {
+        examId: id,
+        questionId: qId,
+        code,
+        language,
+        sessionId
+      });
+      setCodingResults(prev => ({ ...prev, [qId]: data }));
+      // Also save code to general answers
+      setAnswers(prev => ({ ...prev, [qId]: code }));
+    } catch (err) {
+      setCodingResults(prev => ({ ...prev, [qId]: { error: err.response?.data?.error || 'Submission failed' } }));
+    } finally {
+      setIsRunning(false);
     }
   };
 
@@ -341,24 +377,116 @@ const ExamTake = () => {
             </div>
           ) : null}
 
-          {/* Options */}
-          <div style={s.options}>
-            {currentQuestion?.options?.map((option, idx) => {
-              const isSelected = answers[currentQuestion._id] === option._id;
-              return (
-                <button key={option._id || idx} style={{
-                  ...s.optionBtn,
-                  ...(isSelected ? s.optionSelected : {}),
-                }} onClick={() => setAnswers(prev => ({ ...prev, [currentQuestion._id]: option._id }))}>
-                  <span style={{ ...s.optionLetter, ...(isSelected ? s.optionLetterSelected : {}) }}>
-                    {String.fromCharCode(65 + idx)}
-                  </span>
-                  <span style={s.optionText}>{option.text}</span>
-                  {isSelected && <span style={s.checkMark}>✓</span>}
-                </button>
-              );
-            })}
-          </div>
+          {/* Options (for MCQ/True-False) */}
+          {currentQuestion?.questionType === 'mcq' || currentQuestion?.questionType === 'true-false' ? (
+            <div style={s.options}>
+              {currentQuestion?.options?.map((option, idx) => {
+                const isSelected = answers[currentQuestion._id] === option._id;
+                return (
+                  <button key={option._id || idx} style={{
+                    ...s.optionBtn,
+                    ...(isSelected ? s.optionSelected : {}),
+                  }} onClick={() => setAnswers(prev => ({ ...prev, [currentQuestion._id]: option._id }))}>
+                    <span style={{ ...s.optionLetter, ...(isSelected ? s.optionLetterSelected : {}) }}>
+                      {String.fromCharCode(65 + idx)}
+                    </span>
+                    <span style={s.optionText}>{option.text}</span>
+                    {isSelected && <span style={s.checkMark}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {/* Coding Editor (for Coding Questions) */}
+          {currentQuestion?.questionType === 'coding' ? (
+            <div style={s.codingContainer}>
+              <div style={s.codeHeader}>
+                <select 
+                  value={answers[currentQuestion._id + '_lang'] || 'cpp'} 
+                  onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion._id + '_lang']: e.target.value }))}
+                  style={s.langSelect}
+                >
+                  <option value="cpp">C++</option>
+                  <option value="java">Java</option>
+                  <option value="python">Python</option>
+                  <option value="c">C</option>
+                </select>
+                <div style={s.codeActions}>
+                  <button 
+                    onClick={() => runCode(currentQuestion._id, answers[currentQuestion._id] || currentQuestion.starterCode, answers[currentQuestion._id + '_lang'] || 'cpp')}
+                    disabled={isRunning}
+                    style={s.runBtn}
+                  >
+                    {isRunning ? 'Running...' : 'Run Code'}
+                  </button>
+                  <button 
+                    onClick={() => submitCodingQuestion(currentQuestion._id, answers[currentQuestion._id] || currentQuestion.starterCode, answers[currentQuestion._id + '_lang'] || 'cpp')}
+                    disabled={isRunning}
+                    style={s.submitCodeBtn}
+                  >
+                    Submit Code
+                  </button>
+                </div>
+              </div>
+              
+              <textarea
+                style={s.codeEditor}
+                value={answers[currentQuestion._id] !== undefined ? answers[currentQuestion._id] : (currentQuestion.starterCode || '')}
+                onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion._id]: e.target.value }))}
+                placeholder="Write your code here..."
+                spellCheck="false"
+              />
+
+              {codingResults[currentQuestion._id] && (
+                <div style={s.resultsPanel}>
+                  <h4 style={s.resultsH}>Execution Results</h4>
+                  {codingResults[currentQuestion._id].results ? (
+                    // Submit results (test cases)
+                    <div style={s.testGrid}>
+                      <div style={{ marginBottom: '0.5rem', fontWeight: 600, color: codingResults[currentQuestion._id].allPassed ? 'var(--success)' : 'var(--danger)' }}>
+                        {codingResults[currentQuestion._id].passedCount} / {codingResults[currentQuestion._id].totalTests} Test Cases Passed
+                      </div>
+                      {codingResults[currentQuestion._id].results.map((tc, ti) => (
+                        <div key={ti} style={{ ...s.testCaseRow, borderColor: tc.passed ? 'var(--success)' : 'var(--danger)' }}>
+                          <span>Test {ti + 1}: {tc.passed ? '✅ Passed' : '❌ Failed'}</span>
+                          {tc.stderr && <pre style={s.stderrPre}>{tc.stderr}</pre>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    // Run results (single execution)
+                    <div style={s.runResult}>
+                      {codingResults[currentQuestion._id].stdout && (
+                        <div>
+                          <p style={s.resultLabel}>Output:</p>
+                          <pre style={s.stdoutPre}>{codingResults[currentQuestion._id].stdout}</pre>
+                        </div>
+                      )}
+                      {codingResults[currentQuestion._id].stderr && (
+                        <div>
+                          <p style={{ ...s.resultLabel, color: 'var(--danger)' }}>Error:</p>
+                          <pre style={s.stderrPre}>{codingResults[currentQuestion._id].stderr}</pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {/* Short Answer */}
+          {currentQuestion?.questionType === 'short-answer' ? (
+            <div style={s.field}>
+              <textarea
+                style={{ ...s.textarea, minHeight: 120 }}
+                value={answers[currentQuestion._id] || ''}
+                onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion._id]: e.target.value }))}
+                placeholder="Type your answer here..."
+              />
+            </div>
+          ) : null}
 
           {/* Navigation */}
           <div style={s.navRow}>
@@ -509,6 +637,23 @@ const s = {
   vLogItem: { display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', padding: '0.3rem 0', color: 'var(--text-muted)' },
   vTime: { fontFamily: 'var(--font-mono)', color: 'var(--danger)' },
   vType: { textTransform: 'capitalize' },
+
+  // Coding specific styles
+  codingContainer: { display: 'flex', flexDirection: 'column', gap: '0.8rem', marginBottom: '1.5rem', background: 'var(--bg-elevated)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden' },
+  codeHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' },
+  langSelect: { background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 6, padding: '0.3rem 0.6rem', fontSize: '0.85rem', outline: 'none' },
+  codeActions: { display: 'flex', gap: '0.6rem' },
+  runBtn: { background: 'var(--bg-primary)', color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 6, padding: '0.4rem 1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, transition: 'all 0.2s' },
+  submitCodeBtn: { background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, padding: '0.4rem 1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 },
+  codeEditor: { width: '100%', minHeight: 400, background: '#1e1e1e', color: '#d4d4d4', border: 'none', padding: '1rem', fontFamily: 'var(--font-mono)', fontSize: '0.9rem', lineHeight: 1.5, outline: 'none', resize: 'vertical' },
+  resultsPanel: { padding: '1rem', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)' },
+  resultsH: { fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--text-primary)' },
+  testGrid: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
+  testCaseRow: { padding: '0.6rem', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-primary)', fontSize: '0.85rem' },
+  runResult: { background: 'var(--bg-primary)', padding: '0.75rem', borderRadius: 6, border: '1px solid var(--border)' },
+  resultLabel: { fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem' },
+  stdoutPre: { background: '#000', color: '#fff', padding: '0.6rem', borderRadius: 4, overflowX: 'auto', fontSize: '0.8rem', fontFamily: 'var(--font-mono)' },
+  stderrPre: { background: 'rgba(239,68,68,0.1)', color: '#fca5a5', padding: '0.6rem', borderRadius: 4, overflowX: 'auto', fontSize: '0.8rem', fontFamily: 'var(--font-mono)', border: '1px solid rgba(239,68,68,0.2)' },
 };
 
 export default ExamTake;

@@ -60,13 +60,13 @@ const seedData = async () => {
     // Create admin
     const admin = new User({
       name: 'Admin User',
-      email: 'admin@exam.com',
-      password: 'Admin@1234',
+      email: 'admin@gmail.com',
+      password: 'admin@2026',
       role: 'admin',
       isVerified: true,
     });
     await admin.save();
-    console.log('🔑 Admin created: admin@exam.com / Admin@1234');
+    console.log('🔑 Admin created: admin@gmail.com / admin@2026');
 
     // ─── EXAM 1: JavaScript Fundamentals ────────────────────
     const exam1 = new Exam({

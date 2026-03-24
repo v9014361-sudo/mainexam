@@ -32,6 +32,20 @@ const questionSchema = new mongoose.Schema({
     default: 'medium',
   },
   explanation: String,
+  // Coding specific fields
+  testCases: [{
+    input: String,
+    expectedOutput: String,
+    isPublic: { type: Boolean, default: false }
+  }],
+  starterCode: {
+    type: String,
+    default: ''
+  },
+  allowedLanguages: {
+    type: [String],
+    default: ['cpp', 'java', 'python', 'c']
+  }
 });
 
 const examSchema = new mongoose.Schema({

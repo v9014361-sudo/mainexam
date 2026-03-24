@@ -24,6 +24,13 @@ const questionSchema = Joi.object({
   points: Joi.number().min(0).max(100).default(1),
   difficulty: Joi.string().valid('easy', 'medium', 'hard').default('medium'),
   explanation: Joi.string().allow('', null).default(''),
+  testCases: Joi.array().items(Joi.object({
+    input: Joi.string().allow('').default(''),
+    expectedOutput: Joi.string().allow('').default(''),
+    isPublic: Joi.boolean().default(false),
+  })).default([]),
+  starterCode: Joi.string().allow('').default(''),
+  allowedLanguages: Joi.array().items(Joi.string()).default(['cpp', 'java', 'python', 'c']),
 }).custom((value, helpers) => {
   if ((value.questionType === 'mcq' || value.questionType === 'true-false')) {
     if (!value.options || value.options.length < 2) {
@@ -309,14 +316,12 @@ router.post('/:id/start', authenticate, authorize('student'), async (req, res) =
     // IP Restriction
     if (exam.settings.allowedIPs && exam.settings.allowedIPs.length > 0) {
       if (!exam.settings.allowedIPs.includes(req.ip)) {
-        await logSecurityEvent({
+        await logSecurityEvent('exam.start.ip_blocked', {
           actor: req.user._id,
-          action: 'exam.start.ip_blocked',
           resource: 'Exam',
           resourceId: exam._id,
           details: { ip: req.ip, allowed: exam.settings.allowedIPs },
-          severity: 'high',
-          req
+          severity: 'high'
         });
         return res.status(403).json({ error: 'Access denied from this IP address.' });
       }
@@ -327,14 +332,12 @@ router.post('/:id/start', authenticate, authorize('student'), async (req, res) =
       const ua = req.get('User-Agent') || '';
       const isAllowed = exam.settings.allowedDevices.some(d => ua.includes(d));
       if (!isAllowed) {
-        await logSecurityEvent({
+        await logSecurityEvent('exam.start.device_blocked', {
           actor: req.user._id,
-          action: 'exam.start.device_blocked',
           resource: 'Exam',
           resourceId: exam._id,
           details: { userAgent: ua, allowed: exam.settings.allowedDevices },
-          severity: 'high',
-          req
+          severity: 'high'
         });
         return res.status(403).json({ error: 'Access denied from this device/browser.' });
       }
