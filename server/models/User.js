@@ -58,6 +58,26 @@ const userSchema = new mongoose.Schema({
     }],
     encrypted: Boolean,
   }],
+  twoFactorSecret: { type: String, select: false },
+  isTwoFactorEnabled: { type: Boolean, default: false },
+  activeSessions: [{
+    token: String,
+    ip: String,
+    userAgent: String,
+    createdAt: { type: Date, default: Date.now },
+  }],
+  rollNumber: {
+    type: String,
+    trim: true,
+  },
+  branch: {
+    type: String,
+    trim: true,
+  },
+  section: {
+    type: String,
+    trim: true,
+  },
 }, {
   timestamps: true,
 });

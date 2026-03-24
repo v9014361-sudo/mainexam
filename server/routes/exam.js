@@ -62,6 +62,10 @@ const examPayloadSchema = Joi.object({
     preventScreenCapture: Joi.boolean(),
     blockExternalApps: Joi.boolean(),
     disableExtensions: Joi.boolean(),
+    enableInactivityDetection: Joi.boolean(),
+    inactivityTimeout: Joi.number().integer().min(10).max(3600),
+    allowedIPs: Joi.array().items(Joi.string()).default([]),
+    allowedDevices: Joi.array().items(Joi.string()).default([]),
   }).default({}),
   accessCode: Joi.string().trim().min(4).max(32).allow('', null),
   scheduledStart: Joi.date().optional(),
@@ -151,6 +155,40 @@ router.put('/:id', authenticate, authorize('teacher', 'admin'), [
     res.json({ message: 'Exam updated.', exam });
   } catch {
     res.status(500).json({ error: 'Failed to update exam.' });
+  }
+});
+
+// Get all exams (Admin only)
+router.get('/', authenticate, authorize('admin', 'teacher'), async (req, res) => {
+  try {
+    const query = req.user.role === 'admin' ? {} : { createdBy: req.user._id };
+    const exams = await Exam.find(query).sort('-createdAt');
+    
+    // Enrich with statistics
+    const enriched = await Promise.all(exams.map(async (exam) => {
+      const stats = await ExamSession.aggregate([
+        { $match: { examId: exam._id, status: { $in: ['submitted', 'terminated', 'expired'] } } },
+        { 
+          $group: { 
+            _id: null, 
+            avgScore: { $avg: "$percentage" }, 
+            submissionCount: { $sum: 1 } 
+          } 
+        }
+      ]);
+
+      const s = stats[0] || { avgScore: 0, submissionCount: 0 };
+      return {
+        ...exam.toObject(),
+        avgScore: Math.round((s.avgScore || 0) * 10) / 10,
+        submissionCount: s.submissionCount || 0
+      };
+    }));
+
+    res.json({ exams: enriched });
+  } catch (error) {
+    console.error('Fetch exams error:', error);
+    res.status(500).json({ error: 'Failed to fetch all exams.' }); 
   }
 });
 
@@ -265,6 +303,40 @@ router.post('/:id/start', authenticate, authorize('student'), async (req, res) =
         exam.accessCodeHash = await bcrypt.hash(provided, 12);
         exam.accessCode = undefined;
         await exam.save();
+      }
+    }
+
+    // IP Restriction
+    if (exam.settings.allowedIPs && exam.settings.allowedIPs.length > 0) {
+      if (!exam.settings.allowedIPs.includes(req.ip)) {
+        await logSecurityEvent({
+          actor: req.user._id,
+          action: 'exam.start.ip_blocked',
+          resource: 'Exam',
+          resourceId: exam._id,
+          details: { ip: req.ip, allowed: exam.settings.allowedIPs },
+          severity: 'high',
+          req
+        });
+        return res.status(403).json({ error: 'Access denied from this IP address.' });
+      }
+    }
+
+    // Device/Browser Restriction
+    if (exam.settings.allowedDevices && exam.settings.allowedDevices.length > 0) {
+      const ua = req.get('User-Agent') || '';
+      const isAllowed = exam.settings.allowedDevices.some(d => ua.includes(d));
+      if (!isAllowed) {
+        await logSecurityEvent({
+          actor: req.user._id,
+          action: 'exam.start.device_blocked',
+          resource: 'Exam',
+          resourceId: exam._id,
+          details: { userAgent: ua, allowed: exam.settings.allowedDevices },
+          severity: 'high',
+          req
+        });
+        return res.status(403).json({ error: 'Access denied from this device/browser.' });
       }
     }
 
@@ -496,6 +568,54 @@ router.delete('/:id', authenticate, authorize('teacher', 'admin'), async (req, r
     res.json({ message: 'Exam deleted.' });
   } catch {
     res.status(500).json({ error: 'Failed to delete exam.' });
+  }
+});
+
+const { generateCheatingReportPDF, generateExamPerformanceCSV } = require('../utils/reportGenerator');
+
+// ... (rest of imports)
+
+// Get security report (PDF)
+router.get('/:id/report/security', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const exam = await Exam.findById(req.params.id);
+    if (!exam || exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+    const sessions = await ExamSession.find({ examId: req.params.id })
+      .populate('userId', 'name email')
+      .sort('-totalViolations');
+    
+    const buffer = await generateCheatingReportPDF(sessions, exam.title);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=security_report_${exam.title}.pdf`,
+    });
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate PDF report.' });
+  }
+});
+
+// Get performance report (CSV)
+router.get('/:id/report/performance', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const exam = await Exam.findById(req.params.id);
+    if (!exam || exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+    const sessions = await ExamSession.find({ examId: req.params.id })
+      .populate('userId', 'name email')
+      .sort('-score');
+    
+    const buffer = await generateExamPerformanceCSV(sessions);
+    res.set({
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename=performance_report_${exam.title}.csv`,
+    });
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate CSV report.' });
   }
 });
 

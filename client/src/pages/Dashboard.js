@@ -19,6 +19,11 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
+    if (user?.role === 'admin') {
+      navigate('/admin/dashboard', { replace: true });
+      return;
+    }
+
     const fetchExams = async () => {
       try {
         const endpoint = user.role === 'teacher' ? '/exam/my-exams' : '/exam/available';
@@ -60,7 +65,7 @@ const Dashboard = () => {
     (e.description || '').toLowerCase().includes(search.toLowerCase())
   );
 
-  const isTeacher = user?.role === 'teacher' || user?.role === 'admin';
+  const isTeacher = user?.role === 'teacher';
   const teacherDesktop = isTeacher && !isMobile;
 
   return (

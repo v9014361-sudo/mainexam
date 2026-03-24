@@ -15,6 +15,18 @@ import MyResults from './pages/MyResults';
 import Analytics from './pages/Analytics';
 import Profile from './pages/Profile';
 import AdminDashboard from './pages/AdminDashboard';
+import LiveMonitor from './pages/Admin/LiveMonitor';
+import AuditLogs from './pages/Admin/AuditLogs';
+import ManageUsers from './pages/Admin/ManageUsers';
+import ManageExams from './pages/Admin/ManageExams';
+import Settings from './pages/Admin/Settings';
+
+const ResultsListFallback = () => (
+  <div style={{ padding: '2rem' }}>
+    <h2>Exam Results</h2>
+    <p className="text-muted">Select an exam from the dashboard or sidebar to view its detailed results.</p>
+  </div>
+);
 import './styles/globals.css';
 
 const isMobileDevice = () => {
@@ -116,6 +128,13 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 
+const DashboardRedirect = () => {
+  const { user, loading } = useAuth();
+  if (loading) return <FullPageLoader text="Verifying session..." />;
+  if (user?.role === 'admin') return <Navigate to="/admin/dashboard" replace />;
+  return <Dashboard />;
+};
+
 function App() {
   return (
     <ErrorBoundary>
@@ -129,7 +148,33 @@ function App() {
 
               {/* Shared Protected Routes */}
               <Route path="/dashboard" element={
-                <ProtectedRoute><Dashboard /></ProtectedRoute>
+                <ProtectedRoute>
+                  <DashboardRedirect />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/dashboard" element={
+                <ProtectedRoute roles={['admin']}><AdminDashboard /></ProtectedRoute>
+              } />
+              <Route path="/admin/monitor" element={
+                <ProtectedRoute roles={['admin']}><LiveMonitor /></ProtectedRoute>
+              } />
+              <Route path="/admin/audit" element={
+                <ProtectedRoute roles={['admin']}><AuditLogs /></ProtectedRoute>
+              } />
+              <Route path="/admin/students" element={
+                <ProtectedRoute roles={['admin']}><ManageUsers role="student" /></ProtectedRoute>
+              } />
+              <Route path="/admin/faculty" element={
+                <ProtectedRoute roles={['admin']}><ManageUsers role="teacher" /></ProtectedRoute>
+              } />
+              <Route path="/admin/results" element={
+                <ProtectedRoute roles={['admin']}><ResultsListFallback /></ProtectedRoute>
+              } />
+               <Route path="/admin/exams" element={
+                <ProtectedRoute roles={['admin', 'teacher']}><ManageExams /></ProtectedRoute>
+              } />
+              <Route path="/admin/settings" element={
+                <ProtectedRoute roles={['admin']}><Settings /></ProtectedRoute>
               } />
               <Route path="/profile" element={
                 <ProtectedRoute><Profile /></ProtectedRoute>
@@ -144,11 +189,6 @@ function App() {
               } />
               <Route path="/my-results" element={
                 <ProtectedRoute roles={['student']}><MyResults /></ProtectedRoute>
-              } />
-
-              {/* Admin Routes */}
-              <Route path="/admin/users" element={
-                <ProtectedRoute roles={['admin']}><AdminDashboard /></ProtectedRoute>
               } />
 
               {/* Teacher Routes */}
