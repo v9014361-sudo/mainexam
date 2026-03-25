@@ -4,6 +4,7 @@ const Joi = require('joi');
 const bcrypt = require('bcryptjs');
 const Exam = require('../models/Exam');
 const ExamSession = require('../models/ExamSession');
+const { processTrigger } = require('../utils/workflowEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const EncryptionService = require('../utils/encryption');
 const router = express.Router();
@@ -508,6 +509,15 @@ router.post('/:id/submit', authenticate, authorize('student'), async (req, res) 
     session.status = 'submitted';
     session.submittedAt = new Date();
     await session.save();
+
+    // Trigger workflow engine
+    processTrigger('exam_submitted', {
+      userId: session.userId,
+      examId: session.examId,
+      percentage: session.percentage,
+      passed: session.passed,
+      violations: session.totalViolations
+    });
 
     res.json({
       message: 'Exam submitted successfully',

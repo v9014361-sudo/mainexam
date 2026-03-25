@@ -14,12 +14,14 @@ import Results from './pages/Results';
 import MyResults from './pages/MyResults';
 import Analytics from './pages/Analytics';
 import Profile from './pages/Profile';
+import UserManagement from './pages/UserManagement';
 import AdminDashboard from './pages/AdminDashboard';
 import LiveMonitor from './pages/Admin/LiveMonitor';
 import AuditLogs from './pages/Admin/AuditLogs';
 import ManageUsers from './pages/Admin/ManageUsers';
 import ManageExams from './pages/Admin/ManageExams';
 import Settings from './pages/Admin/Settings';
+import WorkflowAutomation from './pages/WorkflowAutomation';
 
 const ResultsListFallback = () => (
   <div style={{ padding: '2rem' }}>
@@ -124,7 +126,17 @@ const ProtectedRoute = ({ children, roles }) => {
 const PublicRoute = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return <FullPageLoader />;
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) {
+    if (user.role === 'admin') return <Navigate to="/admin/users" replace />;
+    return <Navigate to="/dashboard" replace />;
+  }
+  return children;
+};
+
+// Redirector to handle role-based dashboard landing
+const AuthRedirector = ({ children }) => {
+  const { user } = useAuth();
+  if (user?.role === 'admin') return <Navigate to="/admin" replace />;
   return children;
 };
 
@@ -191,12 +203,22 @@ function App() {
                 <ProtectedRoute roles={['student']}><MyResults /></ProtectedRoute>
               } />
 
+              {/* Admin Routes */}
+              <Route path="/admin" element={
+                <ProtectedRoute roles={['admin']}><AdminDashboard /></ProtectedRoute>
+              } />
+              <Route path="/admin/users" element={
+                <ProtectedRoute roles={['admin']}><UserManagement /></ProtectedRoute>
+              } />
+              <Route path="/admin/automation" element={
+                <ProtectedRoute roles={['admin']}><WorkflowAutomation /></ProtectedRoute>
+              } />
               {/* Teacher Routes */}
               <Route path="/exam/create" element={
-                <ProtectedRoute roles={['teacher', 'admin']}><CreateExam /></ProtectedRoute>
+                <ProtectedRoute roles={['teacher']}><CreateExam /></ProtectedRoute>
               } />
               <Route path="/exam/:id/edit" element={
-                <ProtectedRoute roles={['teacher', 'admin']}><CreateExam /></ProtectedRoute>
+                <ProtectedRoute roles={['teacher']}><CreateExam /></ProtectedRoute>
               } />
               <Route path="/results/:id" element={
                 <ProtectedRoute roles={['teacher', 'admin']}><Results /></ProtectedRoute>

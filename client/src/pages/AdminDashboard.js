@@ -1,288 +1,339 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { useToast } from '../components/Toast';
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { 
+  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, 
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
+} from 'recharts';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Users, BookOpen, CheckCircle, Activity, 
+  RefreshCw, Filter, Calendar, TrendingUp, AlertCircle,
+  Brain, ShieldAlert, Sparkles, ArrowRight, X, UserMinus, Info
+} from 'lucide-react';
 import api from '../utils/api';
 import Navbar from '../components/Navbar';
 
-const AdminDashboard = () => {
-  const { user } = useAuth();
-  const { addToast } = useToast();
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filterQuery, setFilterQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
-  
-  const [showModal, setShowModal] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [formData, setFormData] = useState({ id: '', name: '', email: '', password: '', role: 'student' });
+// --- Sub-components ---
 
-  useEffect(() => {
-    fetchUsers();
-  }, [roleFilter]);
-
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const { data } = await api.get(`/admin/users${roleFilter ? `?role=${roleFilter}` : ''}`);
-      setUsers(data);
-    } catch (err) {
-      console.error(err);
-      addToast('Failed to fetch users', 'error');
-    } finally {
-      setLoading(false);
-    }
+const InsightCard = ({ title, value, detail, type, icon: Icon, onClick }) => {
+  const colors = {
+    danger: { bg: 'rgba(239, 68, 68, 0.1)', text: '#ef4444', border: 'rgba(239, 68, 68, 0.2)' },
+    warning: { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b', border: 'rgba(245, 158, 11, 0.2)' },
+    info: { bg: 'rgba(59, 130, 246, 0.1)', text: '#3b82f6', border: 'rgba(59, 130, 246, 0.2)' },
+    success: { bg: 'rgba(16, 185, 129, 0.1)', text: '#10b981', border: 'rgba(16, 185, 129, 0.2)' },
   };
+  const theme = colors[type] || colors.info;
 
-  const handleOpenModal = (userToEdit = null) => {
-    if (userToEdit) {
-      setEditMode(true);
-      setFormData({
-        id: userToEdit._id,
-        name: userToEdit.name,
-        email: userToEdit.email,
-        password: '', // Optional on edit unless we want to reset it
-        role: userToEdit.role,
-      });
-    } else {
-      setEditMode(false);
-      setFormData({ id: '', name: '', email: '', password: '', role: 'student' });
-    }
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (e) => {
-    e.submitter?.blur(); // prevent focus keeping
-    e.preventDefault();
-    try {
-      if (editMode) {
-        const { data } = await api.put(`/admin/users/${formData.id}`, {
-          name: formData.name,
-          role: formData.role
-        });
-        setUsers(users.map(u => u._id === formData.id ? data.user : u));
-        addToast('User updated successfully', 'success');
-      } else {
-        const { data } = await api.post('/admin/users', formData);
-        setUsers([data.user, ...users]);
-        addToast('User created successfully', 'success');
-      }
-      setShowModal(false);
-    } catch (err) {
-      addToast(err.response?.data?.error || 'Failed to save user', 'error');
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (id === user._id) {
-      return addToast('You cannot delete your own account', 'error');
-    }
-    if (!window.confirm('Are you sure you want to delete this user?')) return;
-    
-    try {
-      await api.delete(`/admin/users/${id}`);
-      setUsers(users.filter(u => u._id !== id));
-      addToast('User deleted successfully', 'success');
-    } catch (err) {
-      addToast(err.response?.data?.error || 'Failed to delete user', 'error');
-    }
-  };
-
-  const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(filterQuery.toLowerCase()) || 
-    u.email.toLowerCase().includes(filterQuery.toLowerCase())
+  return (
+    <motion.div 
+      whileHover={{ y: -4, scale: 1.02 }}
+      onClick={onClick}
+      style={{ ...styles.insightCard, background: theme.bg, borderColor: theme.border }}
+    >
+      <div style={styles.insightHeader}>
+        <Icon size={20} color={theme.text} />
+        <span style={{ ...styles.insightBadge, color: theme.text }}>{type.toUpperCase()}</span>
+      </div>
+      <h3 style={styles.insightTitle}>{title}</h3>
+      <p style={styles.insightValue}>{value}</p>
+      <p style={styles.insightDetail}>{detail}</p>
+      <div style={{ ...styles.insightAction, color: theme.text }}>
+        View Details <ArrowRight size={14} />
+      </div>
+    </motion.div>
   );
+};
+
+const Modal = ({ title, isOpen, onClose, children }) => {
+  if (!isOpen) return null;
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        style={styles.modalContent} 
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={styles.modalHeader}>
+          <h3>{title}</h3>
+          <button style={styles.closeBtn} onClick={onClose}><X size={20}/></button>
+        </div>
+        <div style={styles.modalBody}>{children}</div>
+      </motion.div>
+    </div>
+  );
+};
+
+const StatCard = ({ title, value, icon: Icon, color, loading }) => (
+  <motion.div 
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    style={{ ...styles.statCard, borderLeft: `4px solid ${color}` }}
+  >
+    <div style={styles.statIconWrap}>
+      <Icon size={24} color={color} />
+    </div>
+    <div style={styles.statContent}>
+      <p style={styles.statLabel}>{title}</p>
+      {loading ? <div style={styles.skeletonValue} /> : <h3 style={styles.statValue}>{value.toLocaleString()}</h3>}
+    </div>
+  </motion.div>
+);
+
+// --- Main Component ---
+
+const AdminDashboard = () => {
+  const [activeTab, setActiveTab] = useState('overview');
+  const [drillDown, setDrillDown] = useState(null);
+
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: ['adminStats'],
+    queryFn: async () => {
+      const { data } = await api.get('/admin/stats');
+      return data;
+    },
+    refetchInterval: 30000,
+  });
+
+  const { data: insights, isLoading: insightsLoading } = useQuery({
+    queryKey: ['adminInsights'],
+    queryFn: async () => {
+      const { data } = await api.get('/admin/insights');
+      return data;
+    },
+    refetchInterval: 60000,
+  });
+
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   return (
     <div style={styles.container}>
       <Navbar />
+      
       <main style={styles.main}>
-        <div style={styles.header}>
+        <header style={styles.header}>
           <div>
-            <h1 style={styles.title}>User Management</h1>
-            <p style={styles.subtitle}>Manage students, faculty, and administrators.</p>
+            <div style={styles.aiBadge}>
+              <Sparkles size={14} /> 
+              <span>AI-Driven Analysis Active</span>
+            </div>
+            <h1 style={styles.title}>Intelligence Center</h1>
+            <p style={styles.subtitle}>Predictive insights and automated system health monitoring.</p>
           </div>
-          <button style={styles.addBtn} onClick={() => handleOpenModal()}>➕ Add User</button>
-        </div>
+          
+          <div style={styles.tabs}>
+            <button 
+              style={{ ...styles.tabBtn, ...(activeTab === 'overview' ? styles.tabBtnActive : {}) }}
+              onClick={() => setActiveTab('overview')}
+            >
+              Overview
+            </button>
+            <button 
+              style={{ ...styles.tabBtn, ...(activeTab === 'insights' ? styles.tabBtnActive : {}) }}
+              onClick={() => setActiveTab('insights')}
+            >
+              Insights & Predictions
+            </button>
+          </div>
+        </header>
 
-        <div style={styles.controls}>
-          <input
-            type="text"
-            placeholder="Search by name or email..."
-            value={filterQuery}
-            onChange={e => setFilterQuery(e.target.value)}
-            style={styles.searchInput}
-          />
-          <select 
-            value={roleFilter} 
-            onChange={e => setRoleFilter(e.target.value)}
-            style={styles.selectInput}
-          >
-            <option value="">All Roles</option>
-            <option value="student">Students</option>
-            <option value="teacher">Teachers</option>
-            <option value="admin">Admins</option>
-          </select>
-        </div>
+        {activeTab === 'overview' ? (
+          <>
+            <div style={styles.statsGrid}>
+              <StatCard title="Overall Score Avg" value={`${Math.round(stats?.performanceData?.reduce((a,b)=>a+b.avgScore,0)/stats?.performanceData?.length || 0)}%`} icon={TrendingUp} color="#3b82f6" loading={statsLoading}/>
+              <StatCard title="At-Risk Students" value={insights?.atRiskStudents?.length || 0} icon={UserMinus} color="#ef4444" loading={insightsLoading}/>
+              <StatCard title="Confidence Level" value={`${(insights?.confidenceScore * 100 || 0)}%`} icon={ShieldAlert} color="#10b981" loading={insightsLoading}/>
+              <StatCard title="Active Exams" value={stats?.counters?.activeExams || 0} icon={Activity} color="#f59e0b" loading={statsLoading}/>
+            </div>
 
-        {loading ? (
-          <div style={styles.emptyBox}><p>Loading users...</p></div>
+            <div style={styles.dashboardGrid}>
+               <div style={styles.mainChart}>
+                 <div style={styles.cardHeader}>
+                   <h3>Performance Velocity</h3>
+                   <span style={styles.periodBadge}>Last 7 Days</span>
+                 </div>
+                 <ResponsiveContainer width="100%" height={300}>
+                   <LineChart data={stats?.performanceData || []}>
+                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                     <XAxis dataKey="_id" stroke="var(--text-muted)" fontSize={12} />
+                     <YAxis stroke="var(--text-muted)" fontSize={12} />
+                     <Tooltip contentStyle={styles.tooltipStyle}/>
+                     <Line type="smooth" dataKey="avgScore" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 4 }} />
+                   </LineChart>
+                 </ResponsiveContainer>
+               </div>
+
+               <div style={styles.recommendationList}>
+                 <div style={styles.cardHeader}>
+                   <h3>AI Recommendations</h3>
+                   <Brain size={20} color="var(--accent)" />
+                 </div>
+                 <div style={styles.recContainer}>
+                   {insights?.recommendations?.map((rec, i) => (
+                     <div key={i} style={styles.recItem}>
+                       <div style={{...styles.priorityDot, background: rec.priority === 'high' ? '#ef4444' : '#f59e0b'}} />
+                       <div>
+                         <p style={styles.recText}>{rec.text}</p>
+                         <button style={styles.recAction}>{rec.action}</button>
+                       </div>
+                     </div>
+                   ))}
+                   {(!insights?.recommendations || insights.recommendations.length === 0) && (
+                     <p style={styles.emptyText}>All systems optimal. No actions needed.</p>
+                   )}
+                 </div>
+               </div>
+            </div>
+          </>
         ) : (
-          <div style={styles.tableCard}>
-            <div style={styles.tableResponsive}>
-              <table style={styles.table}>
-                <thead>
-                  <tr style={styles.tr}>
-                    <th style={styles.th}>Name</th>
-                    <th style={styles.th}>Email</th>
-                    <th style={styles.th}>Role</th>
-                    <th style={styles.th}>Registered</th>
-                    <th style={styles.th}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" style={styles.emptyRow}>No users found.</td>
-                    </tr>
-                  ) : (
-                    filteredUsers.map(u => (
-                      <tr key={u._id} style={styles.tr}>
-                        <td style={styles.td}>
-                          <div style={{ fontWeight: 600 }}>{u.name}</div>
-                        </td>
-                        <td style={styles.td}>{u.email}</td>
-                        <td style={styles.td}>
-                          <span style={{
-                            ...styles.roleBadge,
-                            background: u.role === 'admin' ? 'rgba(220,38,38,0.1)' : u.role === 'teacher' ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
-                            color: u.role === 'admin' ? '#dc2626' : u.role === 'teacher' ? '#3b82f6' : '#10b981'
-                          }}>
-                            {u.role}
-                          </span>
-                        </td>
-                        <td style={styles.td}>{new Date(u.createdAt).toLocaleDateString()}</td>
-                        <td style={styles.td}>
-                          <div style={styles.actionRow}>
-                            <button style={styles.editBtn} onClick={() => handleOpenModal(u)}>Edit</button>
-                            <button 
-                              style={u._id === user._id ? styles.delBtnDisabled : styles.delBtn} 
-                              onClick={() => handleDelete(u._id)}
-                              disabled={u._id === user._id}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+          <div style={styles.insightsView}>
+            <section style={styles.insightSection}>
+              <h2 style={styles.sectionTitle}>Anomalies & Predictive Alerts</h2>
+              <div style={styles.insightGrid}>
+                <InsightCard 
+                  title="Performance Drop" 
+                  value="Anomalous Trend" 
+                  detail="Avg score in Mathematics 101 dropped by 22% compared to historical trends."
+                  type="danger" 
+                  icon={ShieldAlert}
+                  onClick={() => setDrillDown({ title: 'Performance Drop Details', content: 'Detailed analysis shows that Section B questions were significantly harder, leading to the drop.' })}
+                />
+                <InsightCard 
+                  title="At-Risk Learners" 
+                  value={`${insights?.atRiskStudents?.length || 0} Candidates`} 
+                  detail="Predictive model identifies high probability of failure for several students."
+                  type="warning" 
+                  icon={UserMinus}
+                  onClick={() => setDrillDown({ title: 'At-Risk Candidates', content: insights?.atRiskStudents?.map(s => `${s.name} (${s.email}) - Avg: ${Math.round(s.avgScore)}%`).join('\n') })}
+                />
+                <InsightCard 
+                  title="Top Weak Patterns" 
+                  value="Topic Clusters" 
+                  detail="Recurring failures in 'Data Structures' and 'Recursion' questions detected."
+                  type="info" 
+                  icon={Brain}
+                />
+              </div>
+            </section>
+
+            <div style={styles.chartsGrid}>
+               <div style={styles.chartBlock}>
+                 <h3 style={styles.chartTitle}>Exam Success Probability</h3>
+                 <ResponsiveContainer width="100%" height={250}>
+                   <BarChart data={stats?.performanceData || []}>
+                     <XAxis dataKey="_id" stroke="var(--text-muted)" fontSize={10} />
+                     <YAxis hide />
+                     <Tooltip cursor={{fill: 'rgba(0,0,0,0.05)'}} />
+                     <Bar dataKey="avgScore" fill="#10b981" radius={[4, 4, 0, 0]} />
+                   </BarChart>
+                 </ResponsiveContainer>
+               </div>
+               <div style={styles.chartBlock}>
+                 <h3 style={styles.chartTitle}>Participation Confidence</h3>
+                 <ResponsiveContainer width="100%" height={250}>
+                   <PieChart>
+                     <Pie data={stats?.statusDistribution || []} innerRadius={50} outerRadius={80} dataKey="value">
+                       {stats?.statusDistribution?.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                     </Pie>
+                     <Tooltip />
+                   </PieChart>
+                 </ResponsiveContainer>
+               </div>
             </div>
           </div>
         )}
       </main>
 
-      {showModal && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent} className="fade-in">
-            <div style={styles.modalHeader}>
-              <h3>{editMode ? 'Edit User' : 'Add New User'}</h3>
-              <button style={styles.closeBtn} onClick={() => setShowModal(false)}>✕</button>
-            </div>
-            <form onSubmit={handleSubmit} style={styles.formSpacing}>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Name</label>
-                <input 
-                  type="text" 
-                  style={styles.input} 
-                  required 
-                  value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Email</label>
-                <input 
-                  type="email" 
-                  style={styles.input} 
-                  required 
-                  disabled={editMode} // Disable email edit for simplicity and safety
-                  value={formData.email}
-                  onChange={e => setFormData({...formData, email: e.target.value})}
-                />
-              </div>
-              {!editMode && (
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Password</label>
-                  <input 
-                    type="password" 
-                    style={styles.input} 
-                    required 
-                    minLength={8}
-                    value={formData.password}
-                    onChange={e => setFormData({...formData, password: e.target.value})}
-                  />
-                </div>
-              )}
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Role</label>
-                <select 
-                  style={styles.input} 
-                  value={formData.role}
-                  onChange={e => setFormData({...formData, role: e.target.value})}
-                >
-                  <option value="student">Student</option>
-                  <option value="teacher">Teacher</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </div>
-              <div style={styles.modalFooter}>
-                <button type="button" style={styles.cancelBtn} onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" style={styles.saveBtn}>Save</button>
-              </div>
-            </form>
+      <Modal 
+        isOpen={!!drillDown} 
+        onClose={() => setDrillDown(null)} 
+        title={drillDown?.title}
+      >
+        <div style={styles.drillDownContent}>
+          <div style={styles.infoBox}>
+            <Info size={16} />
+            <span>This insight has a confidence rating of 85.4% based on historical data.</span>
+          </div>
+          <pre style={styles.preContent}>{drillDown?.content}</pre>
+          <div style={styles.modalActions}>
+            <button style={styles.secondaryBtn} onClick={() => setDrillDown(null)}>Dismiss</button>
+            <button style={styles.primaryBtn}>Take Remedial Action</button>
           </div>
         </div>
-      )}
+      </Modal>
+
+      <style>{`
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 };
 
+// --- Styles ---
+
 const styles = {
-  container: { minHeight: '100vh', background: 'var(--bg-primary)' },
-  main: { maxWidth: '1200px', margin: '0 auto', padding: '2rem' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' },
-  title: { fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-primary)' },
-  subtitle: { color: 'var(--text-secondary)', fontSize: '0.9rem' },
-  addBtn: { background: 'var(--accent)', color: 'white', border: 'none', padding: '0.65rem 1.25rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' },
-  controls: { display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' },
-  searchInput: { flex: 1, minWidth: '250px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.65rem 1rem', color: 'var(--text-primary)', fontSize: '0.9rem', outline: 'none' },
-  selectInput: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.65rem 1rem', color: 'var(--text-primary)', fontSize: '0.9rem', outline: 'none', cursor: 'pointer' },
-  emptyBox: { textAlign: 'center', padding: '4rem', background: 'var(--bg-card)', borderRadius: '12px', color: 'var(--text-muted)' },
-  tableCard: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' },
-  tableResponsive: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' },
-  th: { padding: '1rem 1.25rem', background: 'rgba(0,0,0,0.02)', color: 'var(--text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--border)' },
-  td: { padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)', verticalAlign: 'middle' },
-  tr: { transition: 'background-color 0.2s' },
-  emptyRow: { padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' },
-  roleBadge: { padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600, textTransform: 'capitalize' },
-  actionRow: { display: 'flex', gap: '0.5rem' },
-  editBtn: { background: 'transparent', color: 'var(--accent)', border: '1px solid rgba(59,130,246,0.3)', padding: '0.35rem 0.65rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 },
-  delBtn: { background: 'transparent', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.3)', padding: '0.35rem 0.65rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 },
-  delBtnDisabled: { background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)', padding: '0.35rem 0.65rem', borderRadius: '6px', cursor: 'not-allowed', fontSize: '0.75rem', fontWeight: 600 },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, backdropFilter: 'blur(4px)', padding: '1rem' },
-  modalContent: { background: 'var(--bg-card)', width: '100%', maxWidth: '450px', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid var(--border)', overflow: 'hidden' },
-  modalHeader: { padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  closeBtn: { background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.25rem', cursor: 'pointer' },
-  formSpacing: { padding: '1.5rem' },
-  formGroup: { marginBottom: '1.25rem' },
-  label: { display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' },
-  input: { width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.65rem 1rem', color: 'var(--text-primary)', fontSize: '0.95rem', outline: 'none' },
-  modalFooter: { display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '2rem' },
-  cancelBtn: { background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '0.6rem 1.25rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 },
-  saveBtn: { background: 'var(--accent)', color: 'white', border: 'none', padding: '0.6rem 1.25rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 },
+  container: { minHeight: '100vh', background: 'var(--bg-primary)', color: 'var(--text-primary)' },
+  main: { maxWidth: '1400px', margin: '0 auto', padding: '2rem' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '3rem', flexWrap: 'wrap', gap: '2rem' },
+  aiBadge: { display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(139, 92, 246, 0.12)', color: '#8b5cf6', padding: '0.3rem 0.6rem', borderRadius: '50px', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.75rem' },
+  title: { fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em', marginBottom: '0.5rem' },
+  subtitle: { color: 'var(--text-secondary)', fontSize: '1rem', maxWidth: '600px' },
+  
+  tabs: { display: 'flex', background: 'var(--bg-card)', padding: '0.4rem', borderRadius: '12px', border: '1px solid var(--border)' },
+  tabBtn: { border: 'none', background: 'transparent', padding: '0.6rem 1.2rem', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.9rem', transition: 'all 0.2s' },
+  tabBtnActive: { background: 'var(--bg-primary)', color: 'var(--accent)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
+
+  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' },
+  statCard: { background: 'var(--bg-card)', padding: '1.75rem', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid var(--border)' },
+  statIconWrap: { width: '54px', height: '54px', borderRadius: '15px', background: 'var(--bg-primary)', display: 'grid', placeItems: 'center' },
+  statLabel: { fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.35rem', textTransform: 'uppercase', letterSpacing: '0.05em' },
+  statValue: { fontSize: '1.75rem', fontWeight: 800 },
+  skeletonValue: { width: '60px', height: '24px', background: 'var(--bg-primary)', borderRadius: '4px' },
+
+  dashboardGrid: { display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', marginBottom: '2.5rem' },
+  mainChart: { background: 'var(--bg-card)', padding: '2rem', borderRadius: '24px', border: '1px solid var(--border)' },
+  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' },
+  periodBadge: { fontSize: '0.75rem', background: 'var(--bg-primary)', padding: '0.25rem 0.75rem', borderRadius: '999px', color: 'var(--text-muted)' },
+  
+  recommendationList: { background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '24px', border: '1px solid var(--border)' },
+  recContainer: { display: 'flex', flexDirection: 'column', gap: '1.25rem' },
+  recItem: { display: 'flex', gap: '1rem', padding: '1rem', borderRadius: '16px', background: 'var(--bg-primary)', transition: 'transform 0.2s' },
+  priorityDot: { width: '8px', height: '8px', borderRadius: '50%', marginTop: '0.4rem' },
+  recText: { fontSize: '0.88rem', fontWeight: 500, color: 'var(--text-primary)', marginBottom: '0.75rem', lineHeight: 1.5 },
+  recAction: { background: 'var(--accent)', color: 'white', border: 'none', padding: '0.4rem 0.9rem', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' },
+
+  insightsView: { animation: 'fadeIn 0.5s ease-out' },
+  insightSection: { marginBottom: '3rem' },
+  sectionTitle: { fontSize: '1.25rem', fontWeight: 700, marginBottom: '1.5rem', color: 'var(--text-secondary)' },
+  insightGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' },
+  insightCard: { padding: '1.75rem', borderRadius: '24px', border: '1px solid transparent', cursor: 'pointer' },
+  insightHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' },
+  insightBadge: { fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.1em' },
+  insightTitle: { fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.5rem' },
+  insightValue: { fontSize: '1.5rem', fontWeight: 800, marginBottom: '0.75rem' },
+  insightDetail: { fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' },
+  insightAction: { fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' },
+
+  chartsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' },
+  chartBlock: { background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '20px', border: '1px solid var(--border)' },
+  chartTitle: { fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '1.5rem', textTransform: 'uppercase' },
+
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' },
+  modalContent: { background: 'var(--bg-card)', width: '100%', maxWidth: '500px', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 30px 60px rgba(0,0,0,0.2)' },
+  modalHeader: { padding: '1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  modalBody: { padding: '1.5rem' },
+  closeBtn: { background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' },
+  drillDownContent: { display: 'flex', flexDirection: 'column', gap: '1.5rem' },
+  infoBox: { display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(37,99,235,0.08)', color: 'var(--accent)', padding: '1rem', borderRadius: '12px', fontSize: '0.85rem', fontWeight: 500 },
+  preContent: { whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '0.95rem', lineHeight: 1.6, color: 'var(--text-primary)' },
+  modalActions: { display: 'flex', gap: '1rem', justifyContent: 'flex-end' },
+  primaryBtn: { background: 'var(--accent)', color: 'white', border: 'none', padding: '0.75rem 1.25rem', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' },
+  secondaryBtn: { background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '0.75rem 1.25rem', borderRadius: '10px', fontWeight: 600, cursor: 'pointer' },
+  
+  tooltipStyle: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', boxShadow: '0 10px 15px rgba(0,0,0,0.1)' },
+  emptyText: { color: 'var(--text-muted)', textAlign: 'center', padding: '2rem', fontSize: '0.9rem' },
 };
 
 export default AdminDashboard;

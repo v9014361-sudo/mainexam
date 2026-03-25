@@ -23,7 +23,6 @@ const Dashboard = () => {
       navigate('/admin/dashboard', { replace: true });
       return;
     }
-
     const fetchExams = async () => {
       try {
         const endpoint = user.role === 'teacher' ? '/exam/my-exams' : '/exam/available';
@@ -66,7 +65,9 @@ const Dashboard = () => {
   );
 
   const isTeacher = user?.role === 'teacher';
-  const teacherDesktop = isTeacher && !isMobile;
+  const isAdmin = user?.role === 'admin';
+  const hasControlPanel = isTeacher || isAdmin;
+  const teacherDesktop = hasControlPanel && !isMobile;
 
   return (
     <div style={styles.container}>
@@ -76,8 +77,9 @@ const Dashboard = () => {
         <div style={teacherDesktop ? styles.teacherShell : undefined}>
           {teacherDesktop && (
             <aside style={styles.teacherSidebar} className="slide-in">
-              <h4 style={styles.sideHead}>Teacher Panel</h4>
+              <h4 style={styles.sideHead}>{isAdmin ? 'Admin Panel' : 'Teacher Panel'}</h4>
               <button style={styles.sideBtnActive} onClick={() => navigate('/dashboard')}>📋 Dashboard</button>
+              {isAdmin && <button style={styles.sideBtn} onClick={() => navigate('/admin/users')}>👥 User Management</button>}
               <button style={styles.sideBtn} onClick={() => navigate('/exam/create')}>➕ Create Exam</button>
               <button style={styles.sideBtn} onClick={() => navigate('/analytics')}>📊 Analytics</button>
               <button style={styles.sideBtn} onClick={() => navigate('/profile')}>👤 Profile</button>
@@ -88,10 +90,10 @@ const Dashboard = () => {
             <div style={{ ...styles.banner, ...(isMobile ? styles.bannerMobile : {}) }}>
               <div>
                 <h2 style={{ ...styles.bannerTitle, ...(isMobile ? styles.bannerTitleMobile : {}) }}>
-                  {user?.role === 'teacher' ? 'Exam Management' : 'Available Exams'}
+                  {isTeacher ? 'Exam Management' : isAdmin ? 'Admin Control Center' : 'Available Exams'}
                 </h2>
                 <p style={styles.bannerSub}>
-                  {isTeacher ? 'Welcome Teacher' : 'Welcome Student'} • {user?.role === 'teacher'
+                  {isAdmin ? 'Welcome Admin' : isTeacher ? 'Welcome Teacher' : 'Welcome Student'} • {isTeacher || isAdmin
                     ? `You have ${exams.length} exam${exams.length !== 1 ? 's' : ''} created.`
                     : `${exams.length} exam${exams.length !== 1 ? 's' : ''} available to take.`}
                 </p>

@@ -31,10 +31,10 @@ const Navbar = () => {
   const navLinks = useMemo(() => {
     if (user.role === 'admin') {
       return [
-        { to: '/dashboard', label: 'Dashboard', icon: '📋' },
+        { to: '/admin', label: 'Dashboard', icon: '📊' },
         { to: '/admin/users', label: 'Users', icon: '👥' },
-        { to: '/exam/create', label: 'Create', icon: '➕' },
-        { to: '/analytics', label: 'Analytics', icon: '📊' },
+        { to: '/admin/automation', label: 'Automation', icon: '⚙️' },
+        { to: '/analytics', label: 'Analytics', icon: '📈' },
         { to: '/profile', label: 'Profile', icon: '👤' },
       ];
     }
@@ -53,13 +53,13 @@ const Navbar = () => {
     ];
   }, [user.role]);
 
-  const welcomeText = user.role === 'teacher' || user.role === 'admin' ? 'Welcome Teacher' : 'Welcome Student';
+  const welcomeText = user.role === 'admin' ? 'Welcome Admin' : user.role === 'teacher' ? 'Welcome Teacher' : 'Welcome Student';
 
   return (
     <>
       <nav style={styles.nav}>
         <div style={styles.inner}>
-          <Link to="/dashboard" style={styles.logo}>
+          <Link to={user.role === 'admin' ? "/admin" : "/dashboard"} style={styles.logo}>
             <span style={styles.logoMark}>🔒</span>
             <span style={styles.logoText}>SecureExam</span>
           </Link>
