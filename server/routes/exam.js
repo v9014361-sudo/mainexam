@@ -4,12 +4,45 @@ const Joi = require('joi');
 const bcrypt = require('bcryptjs');
 const Exam = require('../models/Exam');
 const ExamSession = require('../models/ExamSession');
+const User = require('../models/User');
 const { processTrigger } = require('../utils/workflowEngine');
 const { authenticate, authorize } = require('../middleware/auth');
 const EncryptionService = require('../utils/encryption');
+const { logSecurityEvent } = require('../utils/securityLogger');
 const router = express.Router();
 
 const isMobileUserAgent = (ua = '') => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobi|Mobile/i.test(ua);
+
+// Helper function to calculate exam score
+const calculateExamScore = (exam, answers) => {
+  let score = 0;
+  const gradedAnswers = answers.map(answer => {
+    const question = exam.questions.id(answer.questionId);
+    if (!question) return { ...answer, isCorrect: false, points: 0 };
+
+    let isCorrect = false;
+    if (question.questionType === 'mcq' || question.questionType === 'true-false') {
+      const correctOption = question.options.find(o => o.isCorrect);
+      isCorrect = correctOption && correctOption._id.toString() === answer.selectedAnswer;
+    } else if (question.questionType === 'short-answer') {
+      isCorrect = question.correctAnswer &&
+        question.correctAnswer.toLowerCase().trim() === String(answer.selectedAnswer).toLowerCase().trim();
+    }
+
+    const points = isCorrect ? question.points : 0;
+    score += points;
+    return { ...answer, isCorrect, points, answeredAt: answer.answeredAt || new Date() };
+  });
+
+  const percentage = exam.totalPoints > 0 ? (score / exam.totalPoints) * 100 : 0;
+  
+  return {
+    score,
+    percentage: Math.round(percentage * 100) / 100,
+    passed: percentage >= exam.passingScore,
+    gradedAnswers
+  };
+};
 
 const optionSchema = Joi.object({
   text: Joi.string().min(1).max(500).required(),
@@ -51,6 +84,7 @@ const questionSchema = Joi.object({
 const examPayloadSchema = Joi.object({
   title: Joi.string().min(1).max(200).required(),
   description: Joi.string().allow('', null).max(1000),
+  expectedStudentCount: Joi.number().integer().min(1).required(),
   duration: Joi.number().integer().min(1).max(480).required(),
   questions: Joi.array().min(1).items(questionSchema).required(),
   passingScore: Joi.number().min(0).max(100).default(40),
@@ -76,8 +110,8 @@ const examPayloadSchema = Joi.object({
     allowedDevices: Joi.array().items(Joi.string()).default([]),
   }).default({}),
   accessCode: Joi.string().trim().min(4).max(32).allow('', null),
-  scheduledStart: Joi.date().optional(),
-  scheduledEnd: Joi.date().optional(),
+  scheduledStart: Joi.date().allow(null).optional(),
+  scheduledEnd: Joi.date().allow(null).optional(),
   isPublished: Joi.boolean().optional(),
   enrolledStudents: Joi.array().items(Joi.string().hex().length(24)).optional(),
 }).options({ abortEarly: false, stripUnknown: true });
@@ -154,7 +188,7 @@ router.put('/:id', authenticate, authorize('teacher', 'admin'), [
       delete validated.accessCode;
     }
 
-    const updatable = ['title', 'description', 'duration', 'passingScore', 'questions', 'settings', 'accessCodeHash', 'scheduledStart', 'scheduledEnd', 'isPublished', 'enrolledStudents'];
+    const updatable = ['title', 'description', 'expectedStudentCount', 'duration', 'passingScore', 'questions', 'settings', 'accessCodeHash', 'scheduledStart', 'scheduledEnd', 'isPublished', 'enrolledStudents'];
     updatable.forEach((field) => {
       if (validated[field] !== undefined) exam[field] = validated[field];
     });
@@ -163,6 +197,18 @@ router.put('/:id', authenticate, authorize('teacher', 'admin'), [
     res.json({ message: 'Exam updated.', exam });
   } catch {
     res.status(500).json({ error: 'Failed to update exam.' });
+  }
+});
+
+// Get eligible students (count and list)
+router.get('/eligible-students', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const students = await User.find({ role: 'student' })
+      .select('name email rollNumber')
+      .sort({ rollNumber: 1 });
+    res.json({ count: students.length, students });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch eligible students.' });
   }
 });
 
@@ -185,11 +231,17 @@ router.get('/', authenticate, authorize('admin', 'teacher'), async (req, res) =>
         }
       ]);
 
+      const activeStats = await ExamSession.countDocuments({
+        examId: exam._id,
+        status: { $in: ['started', 'in_progress'] }
+      });
+
       const s = stats[0] || { avgScore: 0, submissionCount: 0 };
       return {
         ...exam.toObject(),
         avgScore: Math.round((s.avgScore || 0) * 10) / 10,
-        submissionCount: s.submissionCount || 0
+        submissionCount: s.submissionCount || 0,
+        activeUsers: activeStats || 0
       };
     }));
 
@@ -252,6 +304,82 @@ router.get('/available', authenticate, async (req, res) => {
   } catch { res.status(500).json({ error: 'Failed to fetch exams.' }); }
 });
 
+// Get all students and enrollment status for an exam
+router.get('/:id/enrollment', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const exam = await Exam.findById(req.params.id);
+    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+
+    const allStudents = await User.find({ role: 'student' }).select('name email rollNumber branch section');
+    const sessions = await ExamSession.find({ examId: exam._id });
+    
+    const sessionMap = new Map();
+    sessions.forEach(s => sessionMap.set(s.userId.toString(), s.status));
+
+    const enrolledIds = new Set((exam.enrolledStudents || []).map(id => id.toString()));
+    const isRestricted = (exam.enrolledStudents && exam.enrolledStudents.length > 0);
+
+    const now = new Date();
+    const missed = exam.scheduledEnd && now > new Date(exam.scheduledEnd);
+
+    const studentData = allStudents.map(student => {
+      const idStr = student._id.toString();
+      const isEnrolled = isRestricted ? enrolledIds.has(idStr) : true;
+      const sessionStatus = sessionMap.get(idStr);
+
+      let status = 'Pending';
+      if (sessionStatus === 'submitted' || sessionStatus === 'terminated' || sessionStatus === 'expired') {
+        status = 'Attempted';
+      } else if (sessionStatus === 'started' || sessionStatus === 'in_progress') {
+        status = 'In Progress';
+      } else if (missed && !sessionStatus) {
+        status = 'Missed';
+      }
+
+      return {
+        _id: student._id,
+        name: student.name,
+        email: student.email,
+        rollNumber: student.rollNumber,
+        branch: student.branch,
+        section: student.section,
+        isEnrolled,
+        status,
+      };
+    });
+
+    res.json({ students: studentData, isRestrictedOpenToAll: !isRestricted });
+  } catch (error) {
+    console.error('Enrollment fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch enrollment data.' });
+  }
+});
+
+// Update enrolled students for an exam
+router.post('/:id/enroll', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const exam = await Exam.findById(req.params.id);
+    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+
+    const { studentIds } = req.body;
+    if (!Array.isArray(studentIds)) {
+      return res.status(400).json({ error: 'studentIds must be an array.' });
+    }
+
+    exam.enrolledStudents = studentIds;
+    await exam.save();
+
+    res.json({ message: 'Enrollment updated successfully', enrolledCount: studentIds.length });
+  } catch (error) {
+    console.error('Enroll update error:', error);
+    res.status(500).json({ error: 'Failed to update enrollment.' });
+  }
+});
+
 // Get single exam details
 router.get('/:id', authenticate, async (req, res) => {
   try {
@@ -312,6 +440,19 @@ router.post('/:id/start', authenticate, authorize('student'), async (req, res) =
         exam.accessCode = undefined;
         await exam.save();
       }
+    }
+
+    // Check time window
+    const now = new Date();
+    if (exam.scheduledStart && now < new Date(exam.scheduledStart)) {
+      return res.status(403).json({ 
+        error: `Exam has not started yet. Scheduled to start at ${new Date(exam.scheduledStart).toLocaleString()}.` 
+      });
+    }
+    if (exam.scheduledEnd && now > new Date(exam.scheduledEnd)) {
+      return res.status(403).json({ 
+        error: `Exam has already ended. It ended at ${new Date(exam.scheduledEnd).toLocaleString()}.` 
+      });
     }
 
     // IP Restriction
@@ -572,7 +713,7 @@ router.patch('/:id/publish', authenticate, authorize('teacher', 'admin'), async 
 router.delete('/:id', authenticate, authorize('teacher', 'admin'), async (req, res) => {
   try {
     const exam = await Exam.findById(req.params.id);
-    if (!exam || exam.createdBy.toString() !== req.user._id.toString()) {
+    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
       return res.status(403).json({ error: 'Unauthorized.' });
     }
 
@@ -581,6 +722,100 @@ router.delete('/:id', authenticate, authorize('teacher', 'admin'), async (req, r
     res.json({ message: 'Exam deleted.' });
   } catch {
     res.status(500).json({ error: 'Failed to delete exam.' });
+  }
+});
+
+// Re-conduct exam / Reset session (Delete a specific student attempt)
+router.delete('/:id/session/:sessionId', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const exam = await Exam.findById(req.params.id);
+    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+
+    const session = await ExamSession.findOne({ _id: req.params.sessionId, examId: exam._id });
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found or does not belong to this exam.' });
+    }
+
+    await session.deleteOne();
+    res.json({ message: 'Exam session successfully reset. The student can now retake the exam.' });
+  } catch (error) {
+    console.error('Delete session error:', error);
+    res.status(500).json({ error: 'Failed to reset exam session.' });
+  }
+});
+
+// Manually update marks and remarks for a session
+router.patch('/:id/session/:sessionId/marks', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const { id, sessionId } = req.params;
+    const { newScore, reason, remarks } = req.body;
+
+    if (newScore === undefined || !reason) {
+      return res.status(400).json({ error: 'newScore and reason are required.' });
+    }
+
+    const exam = await Exam.findById(id);
+    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
+      return res.status(403).json({ error: 'Unauthorized to edit this exam.' });
+    }
+
+    const session = await ExamSession.findOne({ _id: sessionId, examId: id });
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found.' });
+    }
+
+    const oldScore = session.score || 0;
+    const maxScore = exam.questions.reduce((sum, q) => sum + (q.points || 1), 0);
+    
+    session.score = Number(newScore);
+    session.percentage = maxScore > 0 ? (session.score / maxScore) * 100 : 0;
+    session.passed = session.percentage >= (exam.passingScore || 40);
+    
+    if (remarks !== undefined) {
+      session.remarks = remarks;
+    }
+
+    session.editHistory.push({
+      oldScore,
+      newScore: session.score,
+      reason,
+      timestamp: new Date()
+    });
+
+    await session.save();
+    
+    res.json({ message: 'Marks updated successfully', session });
+  } catch (error) {
+    console.error('Update marks error:', error);
+    res.status(500).json({ error: 'Failed to update marks.' });
+  }
+});
+
+// Toggle flag status for a session
+router.patch('/:id/session/:sessionId/flag', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const { id, sessionId } = req.params;
+    const { isFlagged } = req.body;
+
+    const exam = await Exam.findById(id);
+    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+
+    const session = await ExamSession.findOne({ _id: sessionId, examId: id });
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found.' });
+    }
+
+    session.isFlagged = !!isFlagged;
+    await session.save();
+
+    res.json({ message: 'Flag status updated', isFlagged: session.isFlagged });
+  } catch (error) {
+    console.error('Flag error:', error);
+    res.status(500).json({ error: 'Failed to update flag status.' });
   }
 });
 

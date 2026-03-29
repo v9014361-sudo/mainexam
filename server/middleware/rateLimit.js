@@ -8,7 +8,7 @@ const createLimiter = (options) => rateLimit({
 
 const apiLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 5000, // Increased for 400+ concurrent students
   message: { error: 'Too many requests. Please slow down.' },
 });
 
@@ -32,7 +32,7 @@ const refreshLimiter = createLimiter({
 
 const proctorLimiter = createLimiter({
   windowMs: 5 * 60 * 1000,
-  max: 300,
+  max: 8000, // Increased for 400+ concurrent students with active proctoring
   message: { error: 'Too many proctoring requests. Please slow down.' },
 });
 

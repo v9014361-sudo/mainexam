@@ -69,6 +69,7 @@ const userSchema = new mongoose.Schema({
   rollNumber: {
     type: String,
     trim: true,
+    sparse: true, // Allows multiple null values but enforces uniqueness for non-null values
   },
   branch: {
     type: String,
@@ -78,9 +79,16 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  year: {
+    type: String,
+    trim: true,
+  },
 }, {
   timestamps: true,
 });
+
+// Create unique index on rollNumber (sparse allows null values)
+userSchema.index({ rollNumber: 1 }, { unique: true, sparse: true });
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {

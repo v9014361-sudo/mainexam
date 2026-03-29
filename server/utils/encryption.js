@@ -73,11 +73,28 @@ class EncryptionService {
     return { encrypted, hmac };
   }
 
+  // Decrypt exam data (for verification or server-side processing)
+  static decryptExamData(encryptedData, hmac, sessionKey) {
+    // Verify integrity first
+    if (!this.verifyHMAC(encryptedData, hmac, sessionKey)) {
+      throw new Error('HMAC verification failed - possible tampering detected');
+    }
+    return this.decrypt(encryptedData, sessionKey);
+  }
+
+  // Encrypt exam answers (client-side before sending to server)
+  static encryptExamAnswers(answers, sessionKey) {
+    const dataStr = JSON.stringify(answers);
+    const encrypted = this.encrypt(dataStr, sessionKey);
+    const hmac = this.generateHMAC(encrypted, sessionKey);
+    return { encrypted, hmac };
+  }
+
   // Decrypt and verify exam answers (received from client)
   static decryptExamAnswers(encryptedAnswers, hmac, sessionKey) {
     // Verify integrity first
     if (!this.verifyHMAC(encryptedAnswers, hmac, sessionKey)) {
-      throw new Error('Data integrity check failed - possible tampering detected');
+      throw new Error('HMAC verification failed - possible tampering detected');
     }
     return this.decrypt(encryptedAnswers, sessionKey);
   }

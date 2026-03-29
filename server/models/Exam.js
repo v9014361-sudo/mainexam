@@ -59,6 +59,11 @@ const examSchema = new mongoose.Schema({
     type: String,
     maxlength: 1000,
   },
+  expectedStudentCount: {
+    type: Number,
+    required: [true, 'Expected student count is required'],
+    min: 1,
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -86,6 +91,7 @@ const examSchema = new mongoose.Schema({
     allowReview: { type: Boolean, default: false },
     maxAttempts: { type: Number, default: 1 },
     requireFullscreen: { type: Boolean, default: true },
+    strictFullscreen: { type: Boolean, default: true }, // STRICT MODE: Immediate termination on fullscreen exit
     detectTabSwitch: { type: Boolean, default: true },
     detectCopyPaste: { type: Boolean, default: true },
     maxViolations: { type: Number, default: 5 },
