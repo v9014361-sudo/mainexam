@@ -298,11 +298,14 @@ class ExamProctor {
     // Increment exit count
     this.fullscreenExitCount++;
     
+    console.log(`🚨 Fullscreen exit detected! Count: ${this.fullscreenExitCount}/${this.maxFullscreenExits}`);
+    
     const remainingChances = this.maxFullscreenExits - this.fullscreenExitCount;
     
-    // Check if exceeded maximum exits
+    // Check if exceeded maximum exits (9th exit = terminate immediately)
     if (this.fullscreenExitCount > this.maxFullscreenExits) {
       // Immediate termination - no more chances
+      console.log('❌ Maximum fullscreen exits exceeded - terminating immediately');
       this._reportViolation('fullscreen_max_exits', `Exceeded maximum fullscreen exits (${this.maxFullscreenExits})`, 'critical');
       this.callbacks.onAutoTerminate?.({
         reason: `You exited fullscreen ${this.fullscreenExitCount} times. Maximum allowed is ${this.maxFullscreenExits}. Exam automatically terminated.`,
@@ -316,10 +319,14 @@ class ExamProctor {
     this.fullscreenExitStartTime = Date.now();
 
     // Show blocking modal with "Re-enter Fullscreen" button
+    const modalMessage = remainingChances > 0 
+      ? `🚨 YOU EXITED FULLSCREEN MODE!\n\nExit ${this.fullscreenExitCount} of ${this.maxFullscreenExits} - ${remainingChances} chances remaining.\n\nClick the button below to re-enter fullscreen within 30 seconds.`
+      : `🚨 FINAL WARNING!\n\nThis is your last chance (Exit ${this.fullscreenExitCount}/${this.maxFullscreenExits})!\n\nClick the button below to re-enter fullscreen immediately!`;
+    
+    console.log('📢 Showing fullscreen exit modal:', modalMessage);
+    
     this.callbacks.onFullscreenExit?.({
-      message: remainingChances > 0 
-        ? `🚨 YOU EXITED FULLSCREEN MODE! (Exit ${this.fullscreenExitCount}/${this.maxFullscreenExits}) - ${remainingChances} chances remaining. Click the button below to re-enter fullscreen.`
-        : `🚨 FINAL WARNING! This is your last chance! Click the button below to re-enter fullscreen immediately.`,
+      message: modalMessage,
       requireAction: true,
       blocking: true,
       exitCount: this.fullscreenExitCount,
@@ -328,18 +335,21 @@ class ExamProctor {
     });
 
     // Start 30-second countdown
+    let countdownSeconds = 30;
     this.fullscreenExitTimer = setInterval(() => {
       if (!this.isActive || this.isFullscreen) {
+        console.log('✅ Fullscreen restored or exam stopped - clearing timer');
         clearInterval(this.fullscreenExitTimer);
         this.fullscreenExitTimer = null;
         return;
       }
 
-      const elapsedSeconds = Math.floor((Date.now() - this.fullscreenExitStartTime) / 1000);
-      const remainingSeconds = 30 - elapsedSeconds;
+      countdownSeconds--;
+      console.log(`⏱ Fullscreen countdown: ${countdownSeconds} seconds remaining`);
 
-      if (remainingSeconds <= 0) {
+      if (countdownSeconds <= 0) {
         // Auto-terminate after 30 seconds
+        console.log('❌ 30 seconds elapsed - terminating exam');
         clearInterval(this.fullscreenExitTimer);
         this.fullscreenExitTimer = null;
         this._reportViolation('fullscreen_timeout', 'Failed to re-enter fullscreen within 30 seconds', 'critical');
@@ -351,8 +361,8 @@ class ExamProctor {
       } else {
         // Update countdown
         this.callbacks.onFullscreenCountdown?.({
-          remainingSeconds,
-          message: `⏱ You must re-enter fullscreen within ${remainingSeconds} seconds or exam will terminate!`,
+          remainingSeconds: countdownSeconds,
+          message: `⏱ You must re-enter fullscreen within ${countdownSeconds} seconds or exam will terminate!`,
           exitCount: this.fullscreenExitCount,
           remainingChances,
         });
