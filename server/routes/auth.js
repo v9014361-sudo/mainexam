@@ -26,15 +26,15 @@ const generateRefreshToken = (user) => jwt.sign(
 
 const accessCookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict',
+  secure: true, // Always true for cross-domain cookies
+  sameSite: 'none', // Required for cross-domain (Vercel to Render)
   maxAge: 60 * 60 * 1000,
 };
 
 const refreshCookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict',
+  secure: true, // Always true for cross-domain cookies
+  sameSite: 'none', // Required for cross-domain (Vercel to Render)
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
