@@ -63,6 +63,9 @@ const isPrivateNetworkOrigin = (origin) =>
 const isLocalhostOrigin = (origin) =>
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
+const isVercelOrigin = (origin) =>
+  /^https:\/\/.*\.vercel\.app$/.test(origin);
+
 const corsOptions = {
   origin(origin, callback) {
     // Allow server-to-server requests or tools without browser origin header
@@ -71,6 +74,9 @@ const corsOptions = {
 
     // Allow explicitly configured origins
     if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
+
+    // Allow all Vercel preview and production URLs
+    if (isVercelOrigin(normalizedOrigin)) return callback(null, true);
 
     // In development, allow LAN/mobile origins (e.g. http://192.168.1.5:3000)
     if (process.env.NODE_ENV !== 'production' && isPrivateNetworkOrigin(normalizedOrigin)) {
