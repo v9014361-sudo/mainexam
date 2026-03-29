@@ -102,6 +102,7 @@ const ManageExams = () => {
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>{e.description || 'No description provided.'}</p>
               
               <div style={st.meta}>
+                <div style={st.metaItem} title="Active Users"><Users size={14} color="var(--accent)" /> <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{e.activeUsers || 0} Writing</span></div>
                 <div style={st.metaItem} title="Total Submissions"><Users size={14} /> {e.submissionCount || 0} Subm.</div>
                 <div style={st.metaItem} title="Average Score"><BarChart3 size={14} /> {e.avgScore || 0}% Avg.</div>
                 <div style={st.metaItem} title="Date Created"><Calendar size={14} /> {new Date(e.createdAt).toLocaleDateString()}</div>
@@ -109,6 +110,7 @@ const ManageExams = () => {
 
               <div style={st.footer}>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button className="nav-icon-btn" title="Manage Students" onClick={() => navigate(`/exam/${e._id}/students`)}><Users size={16} /></button>
                   <button className="nav-icon-btn" title="View Results" onClick={() => navigate(`/results/${e._id}`)}><Eye size={16} /></button>
                   <button className="nav-icon-btn" title="Edit" onClick={() => navigate(`/exam/${e._id}/edit`)}><Edit size={16} /></button>
                 </div>

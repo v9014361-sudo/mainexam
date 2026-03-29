@@ -7,14 +7,15 @@ const defaultSettings = {
   shuffleOptions: true,
   showResults: true,
   requireFullscreen: true,
+  strictFullscreen: true, // STRICT MODE: Enabled by default
   detectTabSwitch: true,
   detectCopyPaste: true,
-  maxViolations: 5,
+  maxViolations: 1, // Strict mode: Only 1 violation
   encryptQuestions: true,
   preventScreenCapture: true,
   blockExternalApps: true,
   disableExtensions: false,
-  autoSubmitOnViolation: false,
+  autoSubmitOnViolation: true, // Auto-submit on violation
 };
 
 const emptyQ = {
@@ -39,9 +40,12 @@ const emptyQ = {
 const emptyExam = {
   title: '',
   description: '',
+  expectedStudentCount: '',
   duration: 60,
   passingScore: 40,
   settings: defaultSettings,
+  scheduledStart: '',
+  scheduledEnd: '',
 };
 
 const CreateExam = () => {
@@ -54,6 +58,20 @@ const CreateExam = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingExam, setLoadingExam] = useState(isEditMode);
+  const [studentCount, setStudentCount] = useState(0);
+  const [eligibleStudents, setEligibleStudents] = useState([]);
+  const [showStudents, setShowStudents] = useState(false);
+
+  useEffect(() => {
+    const fetchEligibleStudents = async () => {
+      try {
+        const { data } = await api.get('/exam/eligible-students');
+        setStudentCount(data.count || 0);
+        setEligibleStudents(data.students || []);
+      } catch (err) { }
+    };
+    fetchEligibleStudents();
+  }, []);
 
   useEffect(() => {
     const fetchExam = async () => {
@@ -65,9 +83,12 @@ const CreateExam = () => {
         setExam({
           title: fetched.title || '',
           description: fetched.description || '',
+          expectedStudentCount: fetched.expectedStudentCount || '',
           duration: fetched.duration || 60,
           passingScore: fetched.passingScore ?? 40,
           settings: { ...defaultSettings, ...(fetched.settings || {}) },
+          scheduledStart: fetched.scheduledStart ? new Date(fetched.scheduledStart).toISOString().slice(0, 16) : '',
+          scheduledEnd: fetched.scheduledEnd ? new Date(fetched.scheduledEnd).toISOString().slice(0, 16) : '',
         });
 
         const mappedQuestions = (fetched.questions || []).map((q) => ({
@@ -204,10 +225,14 @@ const CreateExam = () => {
         return rest;
       });
       
+      const payloadExam = { ...exam };
+      payloadExam.scheduledStart = payloadExam.scheduledStart ? new Date(payloadExam.scheduledStart).toISOString() : null;
+      payloadExam.scheduledEnd = payloadExam.scheduledEnd ? new Date(payloadExam.scheduledEnd).toISOString() : null;
+      
       if (isEditMode) {
-        await api.put(`/exam/${id}`, { ...exam, questions: payloadQuestions });
+        await api.put(`/exam/${id}`, { ...payloadExam, questions: payloadQuestions });
       } else {
-        await api.post('/exam/create', { ...exam, questions: payloadQuestions });
+        await api.post('/exam/create', { ...payloadExam, questions: payloadQuestions });
       }
       navigate('/dashboard');
     } catch (err) {
@@ -267,7 +292,32 @@ const CreateExam = () => {
         ) : (
           <form onSubmit={handleSubmit}>
             <div style={st.section}>
-              <h3 style={st.secTitle}>Exam Details</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' }}>
+                <h3 style={{ fontSize: '0.9rem', fontWeight: 600, margin: 0 }}>Exam Details</h3>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <button type="button" onClick={() => setShowStudents(!showStudents)} style={{ background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 12, padding: '0.2rem 0.6rem', fontSize: '0.75rem', cursor: 'pointer', fontFamily: 'var(--font-display)' }}>
+                    {showStudents ? 'Hide Students' : 'View Students'}
+                  </button>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '0.3rem 0.7rem', borderRadius: 20, border: '1px solid var(--border)' }}>
+                    Total Students Eligible: <strong style={{ color: 'var(--accent)' }}>{studentCount}</strong>
+                  </span>
+                </div>
+              </div>
+
+              {showStudents && (
+                <div style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-primary)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <h4 style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text-secondary)' }}>Eligible Student Roll Numbers (Ascending)</h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', maxHeight: 200, overflowY: 'auto' }}>
+                    {eligibleStudents.length > 0 ? eligibleStudents.map(s => (
+                      <span key={s._id} style={{ fontSize: '0.75rem', background: 'var(--bg-card)', padding: '0.3rem 0.6rem', borderRadius: 6, border: '1px solid var(--border)', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
+                        <strong>{s.rollNumber || 'N/A'}</strong> - {s.name}
+                      </span>
+                    )) : (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No students found.</span>
+                    )}
+                  </div>
+                </div>
+              )}
               <div style={st.field}>
                 <label style={st.label}>Title</label>
                 <input style={st.input} value={exam.title} onChange={(e) => setExam((prev) => ({ ...prev, title: e.target.value }))} required />
@@ -276,14 +326,28 @@ const CreateExam = () => {
                 <label style={st.label}>Description</label>
                 <textarea style={st.textarea} value={exam.description} onChange={(e) => setExam((prev) => ({ ...prev, description: e.target.value }))} />
               </div>
+              <div style={st.field}>
+                <label style={st.label}>Expected Student Count *</label>
+                <input type="number" style={st.input} value={exam.expectedStudentCount} onChange={(e) => setExam((prev) => ({ ...prev, expectedStudentCount: e.target.value === '' ? '' : Number(e.target.value) }))} placeholder="Enter total number of students appearing..." min={1} required />
+              </div>
+              <div style={st.row}>
+                <div style={st.field}>
+                  <label style={st.label}>Valid From (Optional)</label>
+                  <input type="datetime-local" style={st.input} value={exam.scheduledStart} onChange={(e) => setExam((prev) => ({ ...prev, scheduledStart: e.target.value }))} />
+                </div>
+                <div style={st.field}>
+                  <label style={st.label}>Valid Until (Optional)</label>
+                  <input type="datetime-local" style={st.input} value={exam.scheduledEnd} onChange={(e) => setExam((prev) => ({ ...prev, scheduledEnd: e.target.value }))} />
+                </div>
+              </div>
               <div style={st.row}>
                 <div style={st.field}>
                   <label style={st.label}>Duration (minutes)</label>
-                  <input type="number" style={st.input} value={exam.duration} onChange={(e) => setExam((prev) => ({ ...prev, duration: +e.target.value }))} min={1} max={480} required />
+                  <input type="number" style={st.input} value={exam.duration} onChange={(e) => setExam((prev) => ({ ...prev, duration: e.target.value === '' ? '' : Number(e.target.value) }))} min={1} max={480} required />
                 </div>
                 <div style={st.field}>
                   <label style={st.label}>Passing Score (%)</label>
-                  <input type="number" style={st.input} value={exam.passingScore} onChange={(e) => setExam((prev) => ({ ...prev, passingScore: +e.target.value }))} min={0} max={100} />
+                  <input type="number" style={st.input} value={exam.passingScore} onChange={(e) => setExam((prev) => ({ ...prev, passingScore: e.target.value === '' ? '' : Number(e.target.value) }))} min={0} max={100} />
                 </div>
               </div>
             </div>
@@ -292,6 +356,7 @@ const CreateExam = () => {
               <h3 style={st.secTitle}>Security Settings</h3>
               {[
                 ['requireFullscreen', 'Require Fullscreen Mode'],
+                ['strictFullscreen', '🚨 STRICT MODE: Instant Termination on Fullscreen Exit'],
                 ['detectTabSwitch', 'Detect Tab Switching'],
                 ['detectCopyPaste', 'Block Copy/Paste'],
                 ['preventScreenCapture', 'Prevent Screenshots'],
@@ -303,7 +368,10 @@ const CreateExam = () => {
                 ['autoSubmitOnViolation', 'Auto-submit on Max Violations'],
               ].map(([key, label]) => (
                 <div key={key} style={st.toggle}>
-                  <span style={st.toggleLabel}>{label}</span>
+                  <span style={{
+                    ...st.toggleLabel,
+                    ...(key === 'strictFullscreen' ? { color: 'var(--danger)', fontWeight: 600 } : {})
+                  }}>{label}</span>
                   <button
                     type="button"
                     onClick={() => toggleSetting(key)}
@@ -319,7 +387,7 @@ const CreateExam = () => {
                   type="number"
                   style={st.input}
                   value={exam.settings.maxViolations}
-                  onChange={(e) => setExam((prev) => ({ ...prev, settings: { ...prev.settings, maxViolations: +e.target.value } }))}
+                  onChange={(e) => setExam((prev) => ({ ...prev, settings: { ...prev.settings, maxViolations: e.target.value === '' ? '' : Number(e.target.value) } }))}
                   min={1}
                   max={50}
                 />
@@ -353,7 +421,7 @@ const CreateExam = () => {
                       <input
                         type="number"
                         value={q.points}
-                        onChange={(e) => updateQuestion(qi, 'points', +e.target.value)}
+                        onChange={(e) => updateQuestion(qi, 'points', e.target.value === '' ? '' : Number(e.target.value))}
                         style={{ ...st.input, width: 60, padding: '0.3rem', fontSize: '0.8rem', textAlign: 'center' }}
                         min={0}
                         placeholder="pts"

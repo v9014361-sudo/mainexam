@@ -29,6 +29,15 @@ class ExamProctor {
     this.hasWarnedScreenSharePermission = false;
     this.lastViolationAt = {};
     this.violationCooldownMs = 1500;
+    // Window exit detection and auto-termination
+    this.isWindowActive = true;
+    this.windowExitTimer = null;
+    this.windowExitStartTime = null;
+    this.autoTerminationSeconds = 30; // Auto-terminate after 30 seconds away
+    this.fullscreenExitTimer = null;
+    this.fullscreenExitStartTime = null;
+    this.fullscreenExitCount = 0; // Track number of fullscreen exits
+    this.maxFullscreenExits = 8; // Allow 8 exits before termination
   }
 
   // ─── START PROCTORING ─────────────────────────────────────
@@ -81,6 +90,9 @@ class ExamProctor {
     if (this.devToolsInterval) clearInterval(this.devToolsInterval);
     if (this.extensionCheckInterval) clearInterval(this.extensionCheckInterval);
     if (this.screenSharePermissionPoll) clearInterval(this.screenSharePermissionPoll);
+    if (this.windowExitTimer) clearInterval(this.windowExitTimer);
+    if (this.strictFullscreenInterval) clearInterval(this.strictFullscreenInterval);
+    if (this.fullscreenExitTimer) clearInterval(this.fullscreenExitTimer);
 
     // Restore patched browser APIs
     if (this.originalWindowOpen) {
@@ -142,8 +154,10 @@ class ExamProctor {
     const visibilityHandler = () => {
       if (!this.isActive) return;
       if (document.hidden || document.visibilityState === 'hidden') {
+        this._handleWindowExit('tab_switch');
         this._reportViolation('tab_switch', 'Tab switch or window hidden detected', 'high');
-        this.callbacks.onViolation?.({ type: 'tab_switch', message: '⚠️ Tab switching detected! Return to the exam immediately.' });
+      } else {
+        this._handleWindowReturn();
       }
     };
     document.addEventListener('visibilitychange', visibilityHandler);
@@ -152,8 +166,8 @@ class ExamProctor {
     // Window blur detection
     const blurHandler = () => {
       if (!this.isActive) return;
+      this._handleWindowExit('window_blur');
       this._reportViolation('window_blur', 'Window lost focus - possible app switch', 'high');
-      this.callbacks.onViolation?.({ type: 'window_blur', message: '⚠️ External application detected! Do not switch away from the exam.' });
     };
     window.addEventListener('blur', blurHandler);
     this.handlers['window:blur'] = blurHandler;
@@ -161,6 +175,7 @@ class ExamProctor {
     // Focus recovery
     const focusHandler = () => {
       if (!this.isActive) return;
+      this._handleWindowReturn();
       // Re-request fullscreen if lost
       if (this.settings.requireFullscreen && !this.isFullscreen) {
         this.requestFullscreen();
@@ -168,6 +183,90 @@ class ExamProctor {
     };
     window.addEventListener('focus', focusHandler);
     this.handlers['window:focus'] = focusHandler;
+  }
+
+  // ─── HANDLE WINDOW EXIT ───────────────────────────────────
+  _handleWindowExit(reason) {
+    if (!this.isWindowActive) return; // Already handling exit
+    
+    this.isWindowActive = false;
+    this.windowExitStartTime = Date.now();
+
+    // STRICT MODE: Reduce timeout to 10 seconds for non-fullscreen violations
+    const timeoutSeconds = this.settings.strictFullscreen ? 10 : this.autoTerminationSeconds;
+
+    // Show persistent blocking modal
+    this.callbacks.onWindowExit?.({
+      reason,
+      message: this.settings.strictFullscreen 
+        ? '🚨 STRICT MODE: You have left the exam window! Return within 10 seconds or exam will terminate!'
+        : '🚨 CRITICAL: You have left the exam window! Click "Return to Exam" to continue.',
+      requireAction: true,
+      blocking: true,
+      strictMode: this.settings.strictFullscreen,
+      timeoutSeconds,
+    });
+
+    // Start auto-termination countdown timer
+    this.windowExitTimer = setInterval(() => {
+      if (!this.isActive || this.isWindowActive) {
+        clearInterval(this.windowExitTimer);
+        this.windowExitTimer = null;
+        return;
+      }
+
+      const elapsedSeconds = Math.floor((Date.now() - this.windowExitStartTime) / 1000);
+      const remainingSeconds = timeoutSeconds - elapsedSeconds;
+
+      if (remainingSeconds <= 0) {
+        // Auto-terminate the exam
+        clearInterval(this.windowExitTimer);
+        this.windowExitTimer = null;
+        this._reportViolation('auto_terminated', 'Exam auto-terminated due to prolonged window exit', 'critical');
+        this.callbacks.onAutoTerminate?.({
+          reason: this.settings.strictFullscreen
+            ? 'STRICT MODE: You left the exam window. Exam automatically terminated.'
+            : 'You stayed away from the exam window for too long',
+          awayDuration: elapsedSeconds,
+          strictMode: this.settings.strictFullscreen,
+        });
+        this.stop();
+      } else {
+        // Update countdown
+        this.callbacks.onWindowExitCountdown?.({
+          remainingSeconds,
+          message: this.settings.strictFullscreen
+            ? `⏱ STRICT MODE: AUTO-TERMINATION IN ${remainingSeconds} SECONDS!`
+            : `⏱ AUTO-TERMINATION IN ${remainingSeconds} SECONDS! Return to exam immediately!`,
+          strictMode: this.settings.strictFullscreen,
+        });
+      }
+    }, 1000);
+  }
+
+  // ─── HANDLE WINDOW RETURN ─────────────────────────────────
+  _handleWindowReturn() {
+    if (this.isWindowActive) return; // Already active
+    
+    this.isWindowActive = true;
+    
+    // Clear auto-termination timer
+    if (this.windowExitTimer) {
+      clearInterval(this.windowExitTimer);
+      this.windowExitTimer = null;
+    }
+
+    // Calculate how long they were away
+    if (this.windowExitStartTime) {
+      const awayDuration = Math.floor((Date.now() - this.windowExitStartTime) / 1000);
+      this.windowExitStartTime = null;
+      
+      // Notify return
+      this.callbacks.onWindowReturn?.({
+        awayDuration,
+        message: `✓ Welcome back! You were away for ${awayDuration} seconds.`,
+      });
+    }
   }
 
   // ─── FULLSCREEN EXIT DETECTION ────────────────────────────
@@ -179,18 +278,105 @@ class ExamProctor {
       
       if (!isFS && this.settings.requireFullscreen) {
         this._reportViolation('fullscreen_exit', 'Exited fullscreen mode', 'critical');
-        this.callbacks.onViolation?.({
-          type: 'fullscreen_exit',
-          message: '🚨 CRITICAL: You exited fullscreen! Click to re-enter fullscreen mode.',
-          requireAction: true,
-        });
+        this._handleFullscreenExit();
         this._updateFullscreenStatus(false);
+      } else if (isFS) {
+        // Returned to fullscreen
+        this._handleFullscreenReturn();
       }
     };
     document.addEventListener('fullscreenchange', fsHandler);
     document.addEventListener('webkitfullscreenchange', fsHandler);
     this.handlers['document:fullscreenchange'] = fsHandler;
     this.handlers['document:webkitfullscreenchange'] = fsHandler;
+  }
+
+  // ─── HANDLE FULLSCREEN EXIT ───────────────────────────────
+  _handleFullscreenExit() {
+    if (this.fullscreenExitTimer) return; // Already handling
+    
+    // Increment exit count
+    this.fullscreenExitCount++;
+    
+    const remainingChances = this.maxFullscreenExits - this.fullscreenExitCount;
+    
+    // Check if exceeded maximum exits
+    if (this.fullscreenExitCount > this.maxFullscreenExits) {
+      // Immediate termination - no more chances
+      this._reportViolation('fullscreen_max_exits', `Exceeded maximum fullscreen exits (${this.maxFullscreenExits})`, 'critical');
+      this.callbacks.onAutoTerminate?.({
+        reason: `You exited fullscreen ${this.fullscreenExitCount} times. Maximum allowed is ${this.maxFullscreenExits}. Exam automatically terminated.`,
+        violationType: 'fullscreen_max_exits',
+        immediate: true,
+      });
+      this.stop();
+      return;
+    }
+    
+    this.fullscreenExitStartTime = Date.now();
+
+    // Show blocking modal with "Re-enter Fullscreen" button
+    this.callbacks.onFullscreenExit?.({
+      message: remainingChances > 0 
+        ? `🚨 YOU EXITED FULLSCREEN MODE! (Exit ${this.fullscreenExitCount}/${this.maxFullscreenExits}) - ${remainingChances} chances remaining. Click the button below to re-enter fullscreen.`
+        : `🚨 FINAL WARNING! This is your last chance! Click the button below to re-enter fullscreen immediately.`,
+      requireAction: true,
+      blocking: true,
+      exitCount: this.fullscreenExitCount,
+      maxExits: this.maxFullscreenExits,
+      remainingChances,
+    });
+
+    // Start 30-second countdown
+    this.fullscreenExitTimer = setInterval(() => {
+      if (!this.isActive || this.isFullscreen) {
+        clearInterval(this.fullscreenExitTimer);
+        this.fullscreenExitTimer = null;
+        return;
+      }
+
+      const elapsedSeconds = Math.floor((Date.now() - this.fullscreenExitStartTime) / 1000);
+      const remainingSeconds = 30 - elapsedSeconds;
+
+      if (remainingSeconds <= 0) {
+        // Auto-terminate after 30 seconds
+        clearInterval(this.fullscreenExitTimer);
+        this.fullscreenExitTimer = null;
+        this._reportViolation('fullscreen_timeout', 'Failed to re-enter fullscreen within 30 seconds', 'critical');
+        this.callbacks.onAutoTerminate?.({
+          reason: 'You did not re-enter fullscreen mode within 30 seconds. Exam automatically terminated.',
+          violationType: 'fullscreen_timeout',
+        });
+        this.stop();
+      } else {
+        // Update countdown
+        this.callbacks.onFullscreenCountdown?.({
+          remainingSeconds,
+          message: `⏱ You must re-enter fullscreen within ${remainingSeconds} seconds or exam will terminate!`,
+          exitCount: this.fullscreenExitCount,
+          remainingChances,
+        });
+      }
+    }, 1000);
+  }
+
+  // ─── HANDLE FULLSCREEN RETURN ─────────────────────────────
+  _handleFullscreenReturn() {
+    if (this.fullscreenExitTimer) {
+      clearInterval(this.fullscreenExitTimer);
+      this.fullscreenExitTimer = null;
+      
+      const awayDuration = this.fullscreenExitStartTime 
+        ? Math.floor((Date.now() - this.fullscreenExitStartTime) / 1000)
+        : 0;
+      
+      this.fullscreenExitStartTime = null;
+      
+      this.callbacks.onFullscreenReturn?.({
+        awayDuration,
+        message: `✓ Fullscreen restored. You were out of fullscreen for ${awayDuration} seconds.`,
+      });
+    }
   }
 
   // ─── COPY/PASTE DETECTION ────────────────────────────────
@@ -303,7 +489,7 @@ class ExamProctor {
         { key: 'F12' },              // DevTools
         { key: 'F5' },               // Refresh
         { ctrl: true, key: 'r' },    // Refresh
-        { key: 'F11' },              // Fullscreen toggle (handle separately)
+        { key: 'F11' },              // Fullscreen toggle
         { alt: true, key: 'Tab' },   // Alt+Tab (limited browser support)
         { meta: true, key: 'Tab' },  // Cmd+Tab (Mac, limited)
         { key: 'PrintScreen' },      // Screenshot
