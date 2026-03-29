@@ -97,6 +97,10 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 app.use(hpp());
 
+// Optimize for high concurrency
+app.set('etag', false);
+app.set('x-powered-by', false);
+
 // Rate limiting (global API)
 app.use('/api', apiLimiter);
 
@@ -172,7 +176,10 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/secure
 const MONGOOSE_OPTIONS = {
   serverSelectionTimeoutMS: 10000,
   socketTimeoutMS: 45000,
-  maxPoolSize: 10,
+  maxPoolSize: 150, // Support 400+ concurrent students
+  minPoolSize: 30,
+  maxIdleTimeMS: 30000,
+  compressors: ['zlib'],
 };
 const INITIAL_RETRY_DELAY_MS = 2000;
 const MAX_RETRY_DELAY_MS = 30000;

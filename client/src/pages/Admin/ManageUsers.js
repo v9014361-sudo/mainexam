@@ -8,6 +8,8 @@ const ManageUsers = ({ role }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
+  const [sectionFilter, setSectionFilter] = useState('');
   const [uploading, setUploading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState({
@@ -16,19 +18,25 @@ const ManageUsers = ({ role }) => {
     password: '',
     rollNumber: '',
     branch: '',
-    section: ''
+    section: '',
+    year: ''
   });
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     fetchUsers();
-  }, [role]);
+  }, [role, yearFilter, sectionFilter]);
 
   const fetchUsers = async () => {
+    setLoading(true);
     try {
-      // Assuming we have an endpoint for this, or we can filter in the backend
-      const { data } = await api.get(`/auth/users?role=${role}`);
-      setUsers(data.users || []);
+      const params = new URLSearchParams();
+      params.append('role', role);
+      if (yearFilter) params.append('year', yearFilter);
+      if (sectionFilter) params.append('section', sectionFilter);
+      
+      const { data } = await api.get(`/admin/users?${params.toString()}`);
+      setUsers(data || []);
     } catch (err) {
       console.error('Failed to fetch users:', err);
     } finally {
@@ -41,27 +49,24 @@ const ManageUsers = ({ role }) => {
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
   
-  const handleDownloadSample = () => {
-    const headers = ['Roll Number', 'Name', 'Email', 'Password', 'Branch', 'Section', 'Role'];
-    const sampleData = [
-      ['21XX1A0501', 'John Doe', 'john@example.com', 'Student@123', 'CSE', 'A', 'student'],
-      ['T001', 'Jane Smith', 'jane.prof@example.com', 'SecurePass!456', 'ECE', 'B', 'teacher']
-    ];
-    
-    const csvContent = [
-      headers.join(','),
-      ...sampleData.map(row => row.join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `${role}_sample_template.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownloadSample = async () => {
+    try {
+      const response = await api.get('/admin/users/sample-template', {
+        responseType: 'blob'
+      });
+      
+      const url = window.URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `user_upload_template_${Date.now()}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download sample:', err);
+      toast.error('Failed to download sample file');
+    }
   };
 
   const handleFileUpload = async (event) => {
@@ -104,7 +109,7 @@ const ManageUsers = ({ role }) => {
       await api.post('/auth/users', { ...formData, role });
       toast.success('User created successfully', { id: toastId });
       setShowAddModal(false);
-      setFormData({ name: '', email: '', password: '', rollNumber: '', branch: '', section: '' });
+      setFormData({ name: '', email: '', password: '', rollNumber: '', branch: '', section: '', year: '' });
       fetchUsers();
     } catch (err) {
       console.error('Add user failed:', err);
@@ -127,6 +132,15 @@ const ManageUsers = ({ role }) => {
       alignItems: 'center', 
       gap: '0.5rem',
       width: '300px'
+    },
+    select: {
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
+      borderRadius: '10px',
+      padding: '0.5rem 1rem',
+      color: 'var(--text-primary)',
+      outline: 'none',
+      cursor: 'pointer'
     },
     input: { background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', width: '100%' },
     grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' },
@@ -169,6 +183,25 @@ const ManageUsers = ({ role }) => {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+
+          <select 
+            value={yearFilter} 
+            onChange={e => setYearFilter(e.target.value)}
+            style={{ ...st.select, width: '130px' }}
+          >
+            <option value="">All Years</option>
+            <option value="I">I Year</option>
+            <option value="II">II Year</option>
+            <option value="III">III Year</option>
+            <option value="IV">IV Year</option>
+          </select>
+
+          <input
+            style={{ ...st.select, width: '100px' }}
+            placeholder="Section"
+            value={sectionFilter}
+            onChange={e => setSectionFilter(e.target.value)}
+          />
           <button 
             className="secondary-btn" 
             style={{ borderRadius: '10px', height: '40px', padding: '0 1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
@@ -221,7 +254,7 @@ const ManageUsers = ({ role }) => {
                   <div style={st.uEmail}><Mail size={12} /> {u.email}</div>
                   {u.role === 'student' && u.rollNumber && (
                     <div style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600, marginTop: '2px' }}>
-                      {u.rollNumber} • {u.branch} {u.section}
+                      {u.rollNumber} • {u.year} Year • {u.branch} {u.section}
                     </div>
                   )}
                 </div>
@@ -312,13 +345,29 @@ const ManageUsers = ({ role }) => {
 
               {(formData.role === 'student' || (!formData.role && role === 'student')) && (
                 <>
-                  <div className="form-group">
-                    <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Roll Number</label>
-                    <input
-                      style={{ ...st.input, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.6rem' }}
-                      value={formData.rollNumber}
-                      onChange={e => setFormData({ ...formData, rollNumber: e.target.value })}
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Roll Number</label>
+                      <input
+                        style={{ ...st.input, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.6rem' }}
+                        value={formData.rollNumber}
+                        onChange={e => setFormData({ ...formData, rollNumber: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Year</label>
+                      <select
+                        style={{ ...st.input, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.6rem', width: '100%', height: '38px' }}
+                        value={formData.year}
+                        onChange={e => setFormData({ ...formData, year: e.target.value })}
+                      >
+                        <option value="">Select Year</option>
+                        <option value="I">I Year</option>
+                        <option value="II">II Year</option>
+                        <option value="III">III Year</option>
+                        <option value="IV">IV Year</option>
+                      </select>
+                    </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                     <div className="form-group">

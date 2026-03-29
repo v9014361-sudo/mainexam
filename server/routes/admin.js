@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const ExcelJS = require('exceljs');
 const Exam = require('../models/Exam');
 const ExamSession = require('../models/ExamSession');
 const Workflow = require('../models/Workflow');
@@ -10,14 +11,56 @@ const { authenticate, authorize } = require('../middleware/auth');
 // All routes require authentication and admin role
 router.use(authenticate, authorize('admin'));
 
+// @route   GET /api/admin/users-template/sample
+// @desc    Get bulk upload sample template
+router.get('/users-template/sample', async (req, res) => {
+  console.log('GET /api/admin/users-template/sample hit');
+  try {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Sample Template');
+
+    worksheet.columns = [
+      { header: 'Roll Number', key: 'rollNumber', width: 15 },
+      { header: 'Name', key: 'name', width: 20 },
+      { header: 'Email', key: 'email', width: 25 },
+      { header: 'Password', key: 'password', width: 15 },
+      { header: 'Branch', key: 'branch', width: 10 },
+      { header: 'Section', key: 'section', width: 10 },
+      { header: 'Year', key: 'year', width: 10 },
+    ];
+
+    worksheet.addRow({
+      rollNumber: '21XX1A0501',
+      name: 'John Doe',
+      email: 'john@example.com',
+      password: 'Student@123',
+      branch: 'CSE',
+      section: 'A',
+      year: 'III',
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=user_upload_template.xlsx');
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Sample template error:', error);
+    res.status(500).json({ error: 'Failed to generate sample template.' });
+  }
+});
+
 // @route   GET /api/admin/users
 // @desc    Get all users (excluding admins, optionally)
 router.get('/users', async (req, res) => {
+  console.log('GET /api/admin/users query:', req.query);
   try {
-    const roleFilter = req.query.role;
+    const { role, year, section } = req.query;
     let query = {};
-    if (roleFilter) {
-      query.role = roleFilter;
+    if (role) query.role = role;
+    if (year) query.year = year;
+    if (section) {
+      query.section = { $regex: new RegExp(`^${section.trim()}$`, 'i') };
     }
     
     // Select desired fields (password is excluded in schema by default, but we can enforce selection)
@@ -36,7 +79,7 @@ router.get('/users', async (req, res) => {
 // @desc    Create a new user (student or teacher)
 router.post('/users', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, rollNumber, branch, section, year } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required' });
@@ -57,6 +100,10 @@ router.post('/users', async (req, res) => {
       email,
       password,
       role: role || 'student',
+      rollNumber,
+      branch,
+      section,
+      year,
       isVerified: true // Admin-created users are auto-verified
     });
 
@@ -71,9 +118,9 @@ router.post('/users', async (req, res) => {
 
 // @route   PUT /api/admin/users/:id
 // @desc    Update a user
-router.put('/users/:id', async (req, res) => {
+  router.put('/users/:id', async (req, res) => {
   try {
-    const { name, role } = req.body;
+    const { name, role, rollNumber, branch, section, year } = req.body;
     
     const validRoles = ['student', 'teacher', 'admin'];
     if (role && !validRoles.includes(role)) {
@@ -87,6 +134,10 @@ router.put('/users/:id', async (req, res) => {
     
     if (name) user.name = name;
     if (role) user.role = role;
+    if (rollNumber !== undefined) user.rollNumber = rollNumber;
+    if (branch !== undefined) user.branch = branch;
+    if (section !== undefined) user.section = section;
+    if (year !== undefined) user.year = year;
 
     await user.save();
 

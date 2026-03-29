@@ -24,6 +24,39 @@ router.post('/violation/:sessionId', proctorLimiter, authenticate, authorize('st
     const exam = await Exam.findById(session.examId);
     if (exam && exam.settings.maxViolations && session.totalViolations >= exam.settings.maxViolations) {
       if (exam.settings.autoSubmitOnViolation) {
+        // Calculate score for terminated exam based on answered questions
+        if (session.answers && session.answers.length > 0) {
+          let score = 0;
+          session.answers.forEach(answer => {
+            const question = exam.questions.id(answer.questionId);
+            if (!question) return;
+
+            let isCorrect = false;
+            if (question.questionType === 'mcq' || question.questionType === 'true-false') {
+              const correctOption = question.options.find(o => o.isCorrect);
+              isCorrect = correctOption && correctOption._id.toString() === answer.selectedAnswer;
+            } else if (question.questionType === 'short-answer') {
+              isCorrect = question.correctAnswer &&
+                question.correctAnswer.toLowerCase().trim() === String(answer.selectedAnswer).toLowerCase().trim();
+            }
+
+            const points = isCorrect ? question.points : 0;
+            score += points;
+            answer.isCorrect = isCorrect;
+            answer.points = points;
+          });
+
+          const percentage = exam.totalPoints > 0 ? (score / exam.totalPoints) * 100 : 0;
+          session.score = score;
+          session.percentage = Math.round(percentage * 100) / 100;
+          session.passed = percentage >= exam.passingScore;
+        } else {
+          // No answers submitted, score is 0
+          session.score = 0;
+          session.percentage = 0;
+          session.passed = false;
+        }
+
         session.status = 'terminated';
         session.terminatedAt = new Date();
         session.terminationReason = `Maximum violations exceeded (${session.totalViolations})`;
@@ -133,6 +166,14 @@ router.get('/violations/:sessionId', authenticate, authorize('teacher', 'admin')
       violations: session.violations,
       totalViolations: session.totalViolations,
       status: session.status,
+      startedAt: session.startedAt,
+      submittedAt: session.submittedAt,
+      terminatedAt: session.terminatedAt,
+      ipAddress: session.ipAddress,
+      userAgent: session.userAgent,
+      focusLostCount: session.focusLostCount,
+      isFlagged: session.isFlagged,
+      browserFingerprint: session.browserFingerprint,
     });
   } catch { res.status(500).json({ error: 'Failed to fetch violations.' }); }
 });

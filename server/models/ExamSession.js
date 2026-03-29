@@ -77,6 +77,20 @@ const examSessionSchema = new mongoose.Schema({
   score: Number,
   percentage: Number,
   passed: Boolean,
+  isFlagged: {
+    type: Boolean,
+    default: false,
+  },
+  remarks: String,
+  editHistory: [{
+    oldScore: Number,
+    newScore: Number,
+    reason: String,
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+  }],
   startedAt: {
     type: Date,
     default: Date.now,

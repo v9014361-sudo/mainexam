@@ -4,6 +4,8 @@ const { body, validationResult } = require('express-validator');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const User = require('../models/User');
+const Exam = require('../models/Exam');
+const ExamSession = require('../models/ExamSession');
 const { authenticate, authorize } = require('../middleware/auth');
 const { authLimiter, registerLimiter, refreshLimiter } = require('../middleware/rateLimit');
 const speakeasy = require('speakeasy');
@@ -80,7 +82,7 @@ router.post('/register', [
 // Login
 router.post('/login', [
   authLimiter,
-  body('email').isEmail().normalizeEmail(),
+  body('email').notEmpty().withMessage('Email or Roll Number is required'),
   body('password').notEmpty(),
 ], async (req, res) => {
   try {
@@ -88,11 +90,20 @@ router.post('/login', [
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { email, password } = req.body;
-    const user = await User.findOne({ email }).select('+password');
+    
+    // Try to find user by email or roll number
+    let user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    
+    // If not found by email, try roll number
     if (!user) {
-      logSecurityEvent('auth.login.invalid_email', { email, ip: req.ip });
+      user = await User.findOne({ rollNumber: email.trim() }).select('+password');
+    }
+    
+    if (!user) {
+      logSecurityEvent('auth.login.invalid_credentials', { identifier: email, ip: req.ip });
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
+    
     if (user.isLocked()) {
       logSecurityEvent('auth.login.locked', { userId: user._id.toString(), ip: req.ip });
       return res.status(423).json({ error: 'Account locked. Try later.' });
@@ -311,6 +322,8 @@ router.get('/users', authenticate, authorize('admin'), async (req, res) => {
 });
 
 // Admin: Create single user
+
+// Admin: Create single user
 router.post('/users', authenticate, authorize('admin'), [
   body('name').trim().isLength({ min: 2, max: 50 }),
   body('email').isEmail().normalizeEmail(),
@@ -385,26 +398,46 @@ router.post('/users/bulk-upload', authenticate, authorize('admin'), upload.singl
       const password = getValue(row.getCell(4));
       const branch = getValue(row.getCell(5));
       const section = getValue(row.getCell(6));
-      const roleFromFile = getValue(row.getCell(7))?.toLowerCase().trim();
+      const year = getValue(row.getCell(7));
+      const roleFromFile = getValue(row.getCell(8))?.toLowerCase().trim();
 
       if (!name && !email && !password) return; // Skip empty rows
 
       results.total++;
 
-      if (!name || !email || !password) {
+      // If email or password is missing, we can try to generate it or skip
+      let finalEmail = email;
+      let finalPassword = password;
+
+      if (!name) {
         results.failed++;
-        results.errors.push(`Row ${rowNumber}: Missing required fields (Name, Email, or Password).`);
+        results.errors.push(`Row ${rowNumber}: Missing name.`);
+        return;
+      }
+
+      if (!finalEmail && rollNumber) {
+        // Simple auto-generate email if missing
+        finalEmail = `${rollNumber.toLowerCase()}@svecw.edu.in`;
+      }
+
+      if (!finalPassword && rollNumber) {
+        // Simple auto-generate password if missing
+        finalPassword = rollNumber;
+      }
+
+      if (!finalEmail || !finalPassword) {
+        results.failed++;
+        results.errors.push(`Row ${rowNumber}: Missing Email or Password.`);
         return;
       }
 
       // Determine the final role
       let finalRole = targetRole;
       if (roleFromFile && ['student', 'teacher', 'admin', 'faculty'].includes(roleFromFile)) {
-        // Handle teacher/faculty alias if needed, though 'teacher' is the internal role
         finalRole = roleFromFile === 'faculty' ? 'teacher' : roleFromFile;
       }
 
-      usersToCreate.push({ rollNumber, name, email, password, branch, section, role: finalRole });
+      usersToCreate.push({ rollNumber, name, email: finalEmail, password: finalPassword, branch, section, year, role: finalRole });
     });
 
     for (const userData of usersToCreate) {

@@ -22,6 +22,8 @@ import ManageUsers from './pages/Admin/ManageUsers';
 import ManageExams from './pages/Admin/ManageExams';
 import Settings from './pages/Admin/Settings';
 import WorkflowAutomation from './pages/WorkflowAutomation';
+import ExamStudents from './pages/Admin/ExamStudents';
+import ViolationDetails from './pages/ViolationDetails';
 
 const ResultsListFallback = () => (
   <div style={{ padding: '2rem' }}>
@@ -185,6 +187,9 @@ function App() {
                <Route path="/admin/exams" element={
                 <ProtectedRoute roles={['admin', 'teacher']}><ManageExams /></ProtectedRoute>
               } />
+              <Route path="/exam/:id/students" element={
+                <ProtectedRoute roles={['admin', 'teacher']}><ExamStudents /></ProtectedRoute>
+              } />
               <Route path="/admin/settings" element={
                 <ProtectedRoute roles={['admin']}><Settings /></ProtectedRoute>
               } />
@@ -225,6 +230,9 @@ function App() {
               } />
               <Route path="/analytics" element={
                 <ProtectedRoute roles={['teacher', 'admin']}><Analytics /></ProtectedRoute>
+              } />
+              <Route path="/violations/:sessionId" element={
+                <ProtectedRoute roles={['teacher', 'admin']}><ViolationDetails /></ProtectedRoute>
               } />
 
               {/* Fallback */}
