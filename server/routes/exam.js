@@ -725,6 +725,26 @@ router.delete('/:id', authenticate, authorize('teacher', 'admin'), async (req, r
   }
 });
 
+// Reset ALL sessions for an exam (allow all students to retake)
+// IMPORTANT: This route must come BEFORE /:id/session/:sessionId to avoid matching "all" as sessionId
+router.delete('/:id/sessions/all', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const exam = await Exam.findById(req.params.id);
+    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+
+    const result = await ExamSession.deleteMany({ examId: exam._id });
+    res.json({ 
+      message: `Successfully reset ${result.deletedCount} exam session(s). All students can now retake the exam.`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Delete all sessions error:', error);
+    res.status(500).json({ error: 'Failed to reset all exam sessions.' });
+  }
+});
+
 // Re-conduct exam / Reset session (Delete a specific student attempt)
 router.delete('/:id/session/:sessionId', authenticate, authorize('teacher', 'admin'), async (req, res) => {
   try {
@@ -743,25 +763,6 @@ router.delete('/:id/session/:sessionId', authenticate, authorize('teacher', 'adm
   } catch (error) {
     console.error('Delete session error:', error);
     res.status(500).json({ error: 'Failed to reset exam session.' });
-  }
-});
-
-// Reset ALL sessions for an exam (allow all students to retake)
-router.delete('/:id/sessions/all', authenticate, authorize('teacher', 'admin'), async (req, res) => {
-  try {
-    const exam = await Exam.findById(req.params.id);
-    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
-      return res.status(403).json({ error: 'Unauthorized.' });
-    }
-
-    const result = await ExamSession.deleteMany({ examId: exam._id });
-    res.json({ 
-      message: `Successfully reset ${result.deletedCount} exam session(s). All students can now retake the exam.`,
-      deletedCount: result.deletedCount
-    });
-  } catch (error) {
-    console.error('Delete all sessions error:', error);
-    res.status(500).json({ error: 'Failed to reset all exam sessions.' });
   }
 });
 
