@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ShieldAlert, FileEdit, Trash2, Search, ArrowLeft, AlertTriangle, AlertCircle, CheckCircle, Flag, X } from 'lucide-react';
+import { ShieldAlert, FileEdit, Trash2, Search, ArrowLeft, AlertTriangle, AlertCircle, CheckCircle, Flag, X, Download } from 'lucide-react';
 import api from '../utils/api';
 
 const Results = () => {
@@ -85,6 +85,93 @@ const Results = () => {
     });
   };
 
+  const handleDownloadMarks = () => {
+    if (!results || results.length === 0) {
+      alert('No results to download');
+      return;
+    }
+
+    try {
+      // Prepare data for CSV
+      const maxMarks = exam ? exam.questions.reduce((sum, q) => sum + (q.points || 1), 0) : 0;
+      const examTitle = exam ? exam.title : 'Exam Results';
+      
+      // CSV Headers
+      const headers = [
+        'Student Name',
+        'Roll Number',
+        'Email',
+        'Score',
+        'Max Marks',
+        'Percentage',
+        'Status',
+        'Passed/Failed',
+        'Total Violations',
+        'Flagged',
+        'Started At',
+        'Submitted At',
+        'Duration (minutes)',
+        'Remarks'
+      ];
+
+      // CSV Rows
+      const rows = results.map(r => {
+        const startedAt = r.startedAt ? new Date(r.startedAt).toLocaleString() : 'N/A';
+        const submittedAt = r.submittedAt ? new Date(r.submittedAt).toLocaleString() : 'N/A';
+        const duration = r.startedAt && r.submittedAt 
+          ? Math.round((new Date(r.submittedAt) - new Date(r.startedAt)) / 60000) 
+          : 'N/A';
+
+        return [
+          r.userId?.name || 'Unknown',
+          r.userId?.rollNumber || 'N/A',
+          r.userId?.email || 'N/A',
+          r.score !== null && r.score !== undefined ? r.score : 0,
+          maxMarks,
+          r.percentage !== null && r.percentage !== undefined ? r.percentage.toFixed(2) : '0.00',
+          r.status || 'completed',
+          r.passed ? 'Passed' : 'Failed',
+          r.totalViolations || 0,
+          r.isFlagged ? 'Yes' : 'No',
+          startedAt,
+          submittedAt,
+          duration,
+          r.remarks || ''
+        ];
+      });
+
+      // Convert to CSV
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => {
+          // Escape commas and quotes in cell content
+          const cellStr = String(cell).replace(/"/g, '""');
+          return cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n') 
+            ? `"${cellStr}"` 
+            : cellStr;
+        }).join(','))
+      ].join('\n');
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `${examTitle.replace(/[^a-z0-9]/gi, '_')}_Results_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log('✅ Downloaded marks for', results.length, 'students');
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Failed to download marks. Please try again.');
+    }
+  };
+
   const filteredResults = results.filter(r => 
     (r.userId?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (r.userId?.rollNumber || '').toLowerCase().includes(searchTerm.toLowerCase())
@@ -137,7 +224,21 @@ const Results = () => {
             <ShieldAlert size={28} className="text-blue" />
             <span>Advanced Results Dashboard</span>
           </div>
-          <div style={{ display: 'flex', gap: '1rem' }}>
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            {isTeacher && results.length > 0 && (
+              <button 
+                onClick={handleDownloadMarks} 
+                style={{ 
+                  ...st.backBtn, 
+                  background: 'var(--accent)', 
+                  color: 'white', 
+                  borderColor: 'var(--accent)' 
+                }}
+                title="Download all marks as CSV"
+              >
+                <Download size={16} /> Download Marks
+              </button>
+            )}
             {isTeacher && (
               <div style={st.searchBar}>
                 <Search size={16} className="text-muted" />
