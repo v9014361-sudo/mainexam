@@ -36,13 +36,24 @@ const deleteFile = (filePath) => {
             fs.unlinkSync(filePath);
         }
 
-        // Clean up binaries
+        // Clean up binaries (check both .exe for Windows and no extension for Linux)
         if (ext === 'java') {
             const classFile = path.join(CODES_DIR, `${filename}.class`);
             if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
         } else if (ext === 'c' || ext === 'cpp') {
+            // Windows executable
             const exeFile = path.join(CODES_DIR, `${filename}.exe`);
             if (fs.existsSync(exeFile)) fs.unlinkSync(exeFile);
+            
+            // Linux/Mac executable (no extension)
+            const linuxExe = path.join(CODES_DIR, filename);
+            if (fs.existsSync(linuxExe)) {
+                try {
+                    fs.unlinkSync(linuxExe);
+                } catch (e) {
+                    // Ignore if it's the source file
+                }
+            }
         }
     } catch (e) {
         console.error(`Error deleting file ${filePath}:`, e.message);
@@ -55,7 +66,12 @@ const runcpp = (codePath, inputPath) => {
         const dir = path.dirname(codePath);
         const inputName = path.basename(inputPath);
         
-        const command = `cd "${dir}" && g++ ${base}.cpp -o ${base}.exe && .\\${base}.exe < ${inputName}`;
+        // Detect OS and use appropriate command
+        const isWindows = process.platform === 'win32';
+        const exeName = isWindows ? `${base}.exe` : base;
+        const exePath = isWindows ? `.\\${exeName}` : `./${base}`;
+        
+        const command = `cd "${dir}" && g++ ${base}.cpp -o ${exeName} && ${exePath} < ${inputName}`;
 
         const env = { ...process.env, PYTHONIOENCODING: 'utf-8', LC_ALL: 'en_US.UTF-8' };
         exec(command, { timeout: 10000, maxBuffer: 1024 * 1024, env }, (error, stdout, stderr) => {
@@ -109,7 +125,12 @@ const runc = (codePath, inputPath) => {
         const dir = path.dirname(codePath);
         const inputName = path.basename(inputPath);
         
-        const command = `cd "${dir}" && gcc ${base}.c -o ${base}.exe && .\\${base}.exe < ${inputName}`;
+        // Detect OS and use appropriate command
+        const isWindows = process.platform === 'win32';
+        const exeName = isWindows ? `${base}.exe` : base;
+        const exePath = isWindows ? `.\\${exeName}` : `./${base}`;
+        
+        const command = `cd "${dir}" && gcc ${base}.c -o ${exeName} && ${exePath} < ${inputName}`;
 
         const env = { ...process.env, PYTHONIOENCODING: 'utf-8', LC_ALL: 'en_US.UTF-8' };
         exec(command, { timeout: 10000, maxBuffer: 1024 * 1024, env }, (error, stdout, stderr) => {
