@@ -5,7 +5,6 @@ import { ToastProvider } from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
 import { FullPageLoader } from './components/LoadingSpinner';
 import Login from './pages/Login';
-import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import ExamPreview from './pages/ExamPreview';
 import ExamTake from './pages/ExamTake';
@@ -158,7 +157,6 @@ function App() {
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
-              <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
 
               {/* Shared Protected Routes */}
               <Route path="/dashboard" element={

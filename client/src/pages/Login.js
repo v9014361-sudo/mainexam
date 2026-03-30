@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
@@ -64,10 +64,6 @@ const Login = () => {
           </button>
         </form>
         
-        <p style={styles.link}>
-          Don't have an account? <Link to="/register" style={styles.linkA}>Register here</Link>
-        </p>
-        
         <div style={styles.security}>
           <span style={styles.secBadge}>🔐 AES-256 Encrypted</span>
           <span style={styles.secBadge}>🛡️ HMAC Verified</span>
@@ -91,8 +87,6 @@ const styles = {
   label: { fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' },
   input: { background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.85rem 1rem', color: 'var(--text-primary)', fontSize: '0.95rem', outline: 'none', fontFamily: 'var(--font-display)', transition: 'border-color 0.2s' },
   button: { background: 'var(--accent)', color: 'white', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0.9rem', fontSize: '0.95rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-display)', transition: 'background 0.2s, transform 0.1s', marginTop: '0.5rem' },
-  link: { textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '1.5rem' },
-  linkA: { color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 },
   security: { display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '2rem', flexWrap: 'wrap' },
   secBadge: { fontSize: '0.7rem', color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '0.3rem 0.6rem', borderRadius: '20px', border: '1px solid var(--border)' },
 };
