@@ -14,7 +14,7 @@ const apiLimiter = createLimiter({
 
 const authLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 100, // Increased for testing and development
+  max: 200, // Increased for production use with multiple users
   message: { error: 'Too many login attempts. Please try again later.' },
 });
 
