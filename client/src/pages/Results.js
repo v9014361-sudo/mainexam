@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ShieldAlert, FileEdit, Trash2, Search, ArrowLeft, AlertTriangle, AlertCircle, CheckCircle, Flag, X, Download } from 'lucide-react';
+import { ShieldAlert, FileEdit, Trash2, Search, ArrowLeft, AlertTriangle, AlertCircle, CheckCircle, Flag, X, Download, Trash } from 'lucide-react';
 import api from '../utils/api';
 
 const Results = () => {
@@ -47,6 +47,31 @@ const Results = () => {
       fetchResults();
     } catch (error) {
       alert(`Failed to reset exam session: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  const handleResetAllSessions = async () => {
+    if (!results || results.length === 0) {
+      alert('No exam sessions to reset');
+      return;
+    }
+
+    const confirmMessage = `⚠️ WARNING: This will reset ALL ${results.length} exam attempts!\n\nAll students will be able to retake the exam.\n\nType "RESET ALL" to confirm:`;
+    const userInput = prompt(confirmMessage);
+    
+    if (userInput !== 'RESET ALL') {
+      alert('Reset cancelled. You must type "RESET ALL" exactly to confirm.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const { data } = await api.delete(`/exam/${id}/sessions/all`);
+      alert(`Successfully reset ${data.deletedCount} exam session(s). All students can now retake the exam.`);
+      fetchResults();
+    } catch (error) {
+      alert(`Failed to reset all sessions: ${error.response?.data?.error || error.message}`);
+      setLoading(false);
     }
   };
 
@@ -226,18 +251,32 @@ const Results = () => {
           </div>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             {isTeacher && results.length > 0 && (
-              <button 
-                onClick={handleDownloadMarks} 
-                style={{ 
-                  ...st.backBtn, 
-                  background: 'var(--accent)', 
-                  color: 'white', 
-                  borderColor: 'var(--accent)' 
-                }}
-                title="Download all marks as CSV"
-              >
-                <Download size={16} /> Download Marks
-              </button>
+              <>
+                <button 
+                  onClick={handleDownloadMarks} 
+                  style={{ 
+                    ...st.backBtn, 
+                    background: 'var(--accent)', 
+                    color: 'white', 
+                    borderColor: 'var(--accent)' 
+                  }}
+                  title="Download all marks as CSV"
+                >
+                  <Download size={16} /> Download Marks
+                </button>
+                <button 
+                  onClick={handleResetAllSessions} 
+                  style={{ 
+                    ...st.backBtn, 
+                    background: 'var(--danger)', 
+                    color: 'white', 
+                    borderColor: 'var(--danger)' 
+                  }}
+                  title="Reset all exam attempts for all students"
+                >
+                  <Trash size={16} /> Reset All Students
+                </button>
+              </>
             )}
             {isTeacher && (
               <div style={st.searchBar}>

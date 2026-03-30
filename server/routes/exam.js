@@ -746,6 +746,25 @@ router.delete('/:id/session/:sessionId', authenticate, authorize('teacher', 'adm
   }
 });
 
+// Reset ALL sessions for an exam (allow all students to retake)
+router.delete('/:id/sessions/all', authenticate, authorize('teacher', 'admin'), async (req, res) => {
+  try {
+    const exam = await Exam.findById(req.params.id);
+    if (!exam || (req.user.role !== 'admin' && exam.createdBy.toString() !== req.user._id.toString())) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+
+    const result = await ExamSession.deleteMany({ examId: exam._id });
+    res.json({ 
+      message: `Successfully reset ${result.deletedCount} exam session(s). All students can now retake the exam.`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Delete all sessions error:', error);
+    res.status(500).json({ error: 'Failed to reset all exam sessions.' });
+  }
+});
+
 // Manually update marks and remarks for a session
 router.patch('/:id/session/:sessionId/marks', authenticate, authorize('teacher', 'admin'), async (req, res) => {
   try {
